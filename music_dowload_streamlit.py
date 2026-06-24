@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 import streamlit.components.v1 as components
 import yt_dlp
@@ -79,24 +80,22 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO COM PRIORIDADES ---
-# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO CORRIGIDO (ARTISTA != CANAL) ---
+# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO (ARTISTA REAL != CANAL) ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
     ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
     
     # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
-    # Se o título for "Falamansa - Xote dos Milagres", isolamos "Falamansa"
     titulo_original = track['title']
     nome_artista = track['uploader'] # Fallback inicial
     
     if " - " in titulo_original:
         nome_artista = titulo_original.split(" - ")[0].strip()
-    elif " – " in titulo_original: # Travessão longo comum
+    elif " – " in titulo_original:
         nome_artista = titulo_original.split(" – ")[0].strip()
     
-    # Remove termos comuns de canais para limpar o nome do artista
+    # Sanitização de sufixos de canais automáticos do YouTube
     termos_limpeza = [" - Topic", " Oficial", " Official", " VEVO", " Tema"]
     for termo in termos_limpeza:
         nome_artista = nome_artista.replace(termo, "")
@@ -105,7 +104,6 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         # --- PRIORIDADE 1: MESMO ÁLBUM ---
         try:
-            # Buscamos combinando o Artista Real + o nome da música para caçar o álbum completo
             query_album = f"{nome_artista} {titulo_original} album completo"
             info_album = ydl.extract_info(f"ytsearch4:{query_album}", download=False)
             if 'entries' in info_album:
@@ -120,10 +118,9 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
         except:
             pass
 
-        # --- PRIORIDADE 2: MESMO ARTISTA REAL (Não o canal) ---
+        # --- PRIORIDADE 2: MESMO ARTISTA REAL ---
         if len(filtradas) < num_resultados:
             try:
-                # Agora a busca é focada na obra do artista extraído
                 query_artista = f"{nome_artista} top musicas"
                 info_artista = ydl.extract_info(f"ytsearch5:{query_artista}", download=False)
                 if 'entries' in info_artista:
@@ -174,12 +171,12 @@ def avancar_fila():
     else:
         st.toast("Fim da playlist automática.", icon="🛑")
 
-# --- INTERFACE ---
+# --- INTERFACE DO USUÁRIO ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
 st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e Playlist.")
 st.write("---")
 
-search_query = st.text_input("", placeholder="Digite uma música ou artista para iniciar a rádio...", label_visibility="collapsed")
+search_query = st.text_input("", placeholder="Digite uma música, artista ou combinação (Ex: zouk x forro)...", label_visibility="collapsed")
 
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
@@ -208,7 +205,6 @@ if search_query:
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
     st.write("---")
-    
     col_player_left, col_queue_right = st.columns([6, 4])
     
     with col_player_left:
@@ -221,7 +217,7 @@ if st.session_state.current_track:
         """, unsafe_allow_html=True)
         
         # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
-        # Passamos a faixa atual e a lista das próximas diretamente para o ambiente do navegador
+        # Resolve o autoplay mantendo o mesmo elemento de áudio ativo no navegador
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -229,7 +225,6 @@ if st.session_state.current_track:
             lista_streams.append(t['stream_url'])
             lista_titulos.append(t['title'])
             
-        import json
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
@@ -249,24 +244,18 @@ if st.session_state.current_track:
             const audio = document.getElementById('audio-player');
             const statusDiv = document.getElementById('player-status');
 
-            // Ouvinte de fim de faixa nativo do navegador (Não depende do Streamlit)
             audio.addEventListener('ended', () => {{
                 currentIdx++;
                 if (currentIdx < playlistTracks.length) {{
                     statusDiv.innerText = "⏭️ Transicionando automaticamente...";
-                    
-                    // Altera a origem do áudio para a próxima música pré-carregada
                     audio.src = playlistTracks[currentIdx];
                     audio.load();
-                    
-                    // O navegador permite o autoplay aqui porque a sessão de áudio já está aberta e ativa!
                     audio.play()
                         .then(() => {{
                             statusDiv.innerHTML = "🔊 Tocando sequência: <br><span style='color:#fff; font-weight:normal;'>" + playlistTitles[currentIdx] + "</span>";
                         }})
                         .catch(err => {{
                             statusDiv.innerText = "❌ Clique no Play para continuar a sequência";
-                            console.log("Autoplay bloqueado pelo navegador, aguardando clique.");
                         }});
                 }} else {{
                     statusDiv.innerText = "🛑 Fim da sequência carregada.";
@@ -275,19 +264,63 @@ if st.session_state.current_track:
         </script>
         """
         
-        # Renderiza o player unificado
-        components.html(js_player_component, height=140)
+        components.html(js_player_component, height=130)
         
-        # Controles Manuais Avançados
+        # --- BOTOÕES DE AÇÃO SIMÉTRICOS ---
         st.write("")
-        c1, c2, c3 = st.columns([2, 8, 2])
-        with c2:
+        c1, c2 = st.columns([1, 1])
+        
+        with c1:
             if st.session_state.queue:
-                texto_proxima = f"Forçar Avanço: {st.session_state.queue[0]['title'][:30]}..."
+                texto_proxima = f"⏭️ Avançar: {st.session_state.queue[0]['title'][:25]}..."
             else:
-                texto_proxima = "Fim da Fila"
+                texto_proxima = "⏹️ Fim da Fila"
                 
             st.markdown('<div class="btn-secondary">', unsafe_allow_html=True)
-            if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
+            if st.button(texto_proxima, use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
+            
+        with c2:
+            url_download = st.session_state.current_track['stream_url']
+            nome_arquivo = f"{st.session_state.current_track['title']}.m4a".replace("/", "_")
+            
+            botao_download_html = f"""
+                <a href="{url_download}" download="{nome_arquivo}" target="_blank" style="text-decoration: none;">
+                    <button style="
+                        width: 100%;
+                        background-color: #282828;
+                        color: #FFFFFF;
+                        border: 1px solid #727272;
+                        border-radius: 50px;
+                        padding: 10px 24px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        font-family: sans-serif;
+                        font-size: 14px;
+                        transition: all 0.2s ease-in-out;
+                    " onmouseover="this.style.borderColor='#FFFFFF'" onmouseout="this.style.borderColor='#727272'">
+                        📥 Baixar Faixa Atual (.m4a)
+                    </button>
+                </a>
+            """
+            components.html(botao_download_html, height=50)
+
+    # COLUNA 2: A FILA DINÂMICA COM OS LABELS DE PRIORIDADE
+    with col_queue_right:
+        st.subheader("⏭️ A Seguir (Ordem de Afinidade)")
+        
+        if st.session_state.queue:
+            for q_idx, q_track in enumerate(st.session_state.queue):
+                with st.container(border=True):
+                    col_q_info, col_q_play = st.columns([8, 2])
+                    with col_q_info:
+                        st.markdown(f'<span class="priority-badge" style="background-color: {q_track["tag_color"]};">{q_track["tag"]}</span>', unsafe_allow_html=True)
+                        st.markdown(f"**{q_track['title'][:45]}...**" if len(q_track['title']) > 45 else f"**{q_track['title']}**")
+                        st.caption(f"{q_track['uploader']} • {q_track['duration']}")
+                    with col_q_play:
+                        if st.button("▶️", key=f"play_q_{q_track['id']}_{q_idx}"):
+                            st.session_state.queue.pop(q_idx)
+                            tocar_faixa(q_track)
+        else:
+            st.write("Fila vazia.")
