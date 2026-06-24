@@ -83,9 +83,16 @@ if 'history' not in st.session_state:
 # --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO (ARTISTA REAL != CANAL) ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
-    nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
-    ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
     
+    nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio', 
+        'extract_flat': False, 
+        'skip_download': True,
+        'postprocessor_args': [
+            '-af', 'silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB:bg_periods=-1:bg_threshold=-50dB'
+        ]
+    }    
     # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
     nome_artista = track['uploader'] # Fallback inicial
@@ -181,7 +188,14 @@ search_query = st.text_input("", placeholder="Digite uma música, artista ou com
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
+            ydl_opts_main = {
+                'format': 'bestaudio[ext=m4a]/bestaudio', 
+                'extract_flat': False, 
+                'skip_download': True,
+                'postprocessor_args': [
+                    '-af', 'silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB:bg_periods=-1:bg_threshold=-50dB'
+                ]
+            }
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                 info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
             if 'entries' in info_main and len(info_main['entries']) > 0:
