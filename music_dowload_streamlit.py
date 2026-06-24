@@ -214,56 +214,76 @@ if st.session_state.current_track:
     with col_player_left:
         st.markdown(f"""
             <div class="now-playing-box">
-                <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">TOCANDO AGORA VIA STREAMING</span>
-                <h2 style="margin-top: 5px; margin-bottom: 5px; font-size: 1.8rem;">{st.session_state.current_track['title']}</h2>
-                <span style="color: #B3B3B3;">Canal original: {st.session_state.current_track['uploader']} | Duração: {st.session_state.current_track['duration']}</span>
+                <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">PLAYLIST CONTÍNUA ATIVA</span>
+                <h2 style="margin-top: 5px; margin-bottom: 5px; font-size: 1.6rem;">{st.session_state.current_track['title']}</h2>
+                <span style="color: #B3B3B3;">Origem: {st.session_state.current_track['uploader']}</span>
             </div>
         """, unsafe_allow_html=True)
         
-        # --- INJEÇÃO HTML5 + JAVASCRIPT: AUTOPLAY & FADE OUT ---
-        src_audio = st.session_state.current_track['stream_url']
+        # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
+        # Passamos a faixa atual e a lista das próximas diretamente para o ambiente do navegador
+        lista_streams = [st.session_state.current_track['stream_url']]
+        lista_titulos = [st.session_state.current_track['title']]
+        
+        for t in st.session_state.queue:
+            lista_streams.append(t['stream_url'])
+            lista_titulos.append(t['title'])
+            
+        import json
+        js_streams = json.dumps(lista_streams)
+        js_titulos = json.dumps(lista_titulos)
         
         js_player_component = f"""
-        <div style="background-color: #181818; padding: 15px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
-            <audio id="audio-player" src="{src_audio}" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>
+        <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
+            <audio id="audio-player" src="{lista_streams[0]}" controls autoplay style="width: 100%; height: 40px;"></audio>
+            <div id="player-status" style="color: #1DB954; font-size: 0.85rem; font-family: sans-serif; margin-top: 10px; text-align: center; font-weight: bold;">
+                🔊 Tocando agora a faixa inicial
+            </div>
         </div>
 
         <script>
+            const playlistTracks = {js_streams};
+            const playlistTitles = {js_titulos};
+            let currentIdx = 0;
+            
             const audio = document.getElementById('audio-player');
-            let fadeTriggered = false;
+            const statusDiv = document.getElementById('player-status');
 
-            audio.addEventListener('timeupdate', () => {{
-                const timeLeft = audio.duration - audio.currentTime;
-                if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
-                    fadeTriggered = true;
-                    fadeVolumeOut(audio);
+            // Ouvinte de fim de faixa nativo do navegador (Não depende do Streamlit)
+            audio.addEventListener('ended', () => {{
+                currentIdx++;
+                if (currentIdx < playlistTracks.length) {{
+                    statusDiv.innerText = "⏭️ Transicionando automaticamente...";
+                    
+                    // Altera a origem do áudio para a próxima música pré-carregada
+                    audio.src = playlistTracks[currentIdx];
+                    audio.load();
+                    
+                    // O navegador permite o autoplay aqui porque a sessão de áudio já está aberta e ativa!
+                    audio.play()
+                        .then(() => {{
+                            statusDiv.innerHTML = "🔊 Tocando sequência: <br><span style='color:#fff; font-weight:normal;'>" + playlistTitles[currentIdx] + "</span>";
+                        }})
+                        .catch(err => {{
+                            statusDiv.innerText = "❌ Clique no Play para continuar a sequência";
+                            console.log("Autoplay bloqueado pelo navegador, aguardando clique.");
+                        }});
+                }} else {{
+                    statusDiv.innerText = "🛑 Fim da sequência carregada.";
                 }}
             }});
-
-            function fadeVolumeOut(player) {{
-                let volume = player.volume;
-                const interval = setInterval(() => {{
-                    if (volume > 0.05) {{
-                        volume -= 0.05;
-                        player.volume = volume;
-                    }} else {{
-                        player.volume = 0;
-                        clearInterval(interval);
-                        window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
-                    }}
-                }}, 200);
-            }}
         </script>
         """
         
-        components.html(js_player_component, height=90)
+        # Renderiza o player unificado
+        components.html(js_player_component, height=140)
         
-        # Controles Manuais Alternativos
+        # Controles Manuais Avançados
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
         with c2:
             if st.session_state.queue:
-                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
+                texto_proxima = f"Forçar Avanço: {st.session_state.queue[0]['title'][:30]}..."
             else:
                 texto_proxima = "Fim da Fila"
                 
@@ -271,23 +291,3 @@ if st.session_state.current_track:
             if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
-
-    # COLUNA 2: A FILA DINÂMICA COM OS LABELS DE PRIORIDADE
-    with col_queue_right:
-        st.subheader("⏭️ A Seguir (Ordem de Afinidade)")
-        
-        if st.session_state.queue:
-            for q_idx, q_track in enumerate(st.session_state.queue):
-                with st.container(border=True):
-                    col_q_info, col_q_play = st.columns([8, 2])
-                    with col_q_info:
-                        # Emite o badge colorido baseado no tipo de prioridade alcançada
-                        st.markdown(f'<span class="priority-badge" style="background-color: {q_track["tag_color"]};">{q_track["tag"]}</span>', unsafe_allow_html=True)
-                        st.markdown(f"**{q_track['title'][:45]}...**" if len(q_track['title']) > 45 else f"**{q_track['title']}**")
-                        st.caption(f"{q_track['uploader']} • {q_track['duration']}")
-                    with col_q_play:
-                        if st.button("▶️", key=f"play_q_{q_track['id']}_{q_idx}"):
-                            st.session_state.queue.pop(q_idx)
-                            tocar_faixa(q_track)
-        else:
-            st.write("Fila vazia.")
