@@ -83,8 +83,8 @@ if 'history' not in st.session_state:
 # --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO (ARTISTA REAL != CANAL) ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
-    
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
+    
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio', 
         'extract_flat': False, 
@@ -93,6 +93,7 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
             '-af', 'silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB:bg_periods=-1:bg_threshold=-50dB'
         ]
     }    
+    
     # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
     nome_artista = track['uploader'] # Fallback inicial
@@ -231,7 +232,6 @@ if st.session_state.current_track:
         """, unsafe_allow_html=True)
         
         # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
-        # Resolve o autoplay mantendo o mesmo elemento de áudio ativo no navegador
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -280,7 +280,7 @@ if st.session_state.current_track:
         
         components.html(js_player_component, height=130)
         
-        # --- BOTOÕES DE AÇÃO SIMÉTRICOS ---
+        # --- BOTÕES DE AÇÃO SIMÉTRICOS ---
         st.write("")
         c1, c2 = st.columns([1, 1])
         
