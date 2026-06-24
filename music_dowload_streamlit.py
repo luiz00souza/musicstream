@@ -80,34 +80,51 @@ if 'history' not in st.session_state:
     st.session_state.history = []
 
 # --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO COM PRIORIDADES ---
+# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO CORRIGIDO (ARTISTA != CANAL) ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
     ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
     
+    # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
+    # Se o título for "Falamansa - Xote dos Milagres", isolamos "Falamansa"
+    titulo_original = track['title']
+    nome_artista = track['uploader'] # Fallback inicial
+    
+    if " - " in titulo_original:
+        nome_artista = titulo_original.split(" - ")[0].strip()
+    elif " – " in titulo_original: # Travessão longo comum
+        nome_artista = titulo_original.split(" – ")[0].strip()
+    
+    # Remove termos comuns de canais para limpar o nome do artista
+    termos_limpeza = [" - Topic", " Oficial", " Official", " VEVO", " Tema"]
+    for termo in termos_limpeza:
+        nome_artista = nome_artista.replace(termo, "")
+    nome_artista = nome_artista.strip()
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         # --- PRIORIDADE 1: MESMO ÁLBUM ---
-        # Tenta extrair metadados do álbum ou busca pelo nome da faixa + "album completo" / "completo"
         try:
-            query_album = f"{track['title']} album completo"
+            # Buscamos combinando o Artista Real + o nome da música para caçar o álbum completo
+            query_album = f"{nome_artista} {titulo_original} album completo"
             info_album = ydl.extract_info(f"ytsearch4:{query_album}", download=False)
             if 'entries' in info_album:
                 for entry in info_album['entries']:
                     if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                        if track['uploader'].lower() in entry.get('uploader', '').lower():
-                            filtradas.append({
-                                'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': e.get('id', entry.get('id')),
-                                'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
-                            })
-                            nomes_bloqueados.append(entry.get('title'))
+                        filtradas.append({
+                            'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
+                            'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                            'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
+                        })
+                        nomes_bloqueados.append(entry.get('title'))
         except:
             pass
 
-        # --- PRIORIDADE 2: MESMO ARTISTA (Fallback) ---
+        # --- PRIORIDADE 2: MESMO ARTISTA REAL (Não o canal) ---
         if len(filtradas) < num_resultados:
             try:
-                query_artista = f"{track['uploader']} top musicas"
+                # Agora a busca é focada na obra do artista extraído
+                query_artista = f"{nome_artista} top musicas"
                 info_artista = ydl.extract_info(f"ytsearch5:{query_artista}", download=False)
                 if 'entries' in info_artista:
                     for entry in info_artista['entries']:
@@ -121,10 +138,10 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
             except:
                 pass
 
-        # --- PRIORIDADE 3: MESMA PLAYLIST / MIX (Último recurso) ---
+        # --- PRIORIDADE 3: MESMA PLAYLIST / MIX ---
         if len(filtradas) < num_resultados:
             try:
-                query_mix = f"{track['title']} mix musicas semelhantes"
+                query_mix = f"{titulo_original} mix musicas semelhantes"
                 info_mix = ydl.extract_info(f"ytsearch5:{query_mix}", download=False)
                 if 'entries' in info_mix:
                     for entry in info_mix['entries']:
