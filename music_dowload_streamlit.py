@@ -1,11 +1,12 @@
 import os
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 import yt_dlp
+import time
 
 # Configuração da página
 st.set_page_config(
-    page_title="SpotPy - Continuous Streaming", 
+    page_title="SpotPy - Real Continuous Streaming", 
     page_icon="🎵", 
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -15,7 +16,7 @@ st.set_page_config(
 st.markdown("""
     <style>
     .stApp { background-color: #121212; color: #FFFFFF; }
-    h1 { color: #1DB954 !important; font-family: 'Circular', sans-serif; font-weight: 800; margin-bottom: 0px;}
+    h1 { color: #1DB954 !important; font-family: 'Circular', sans-serif; font-weight: 800; }
     h2, h3 { color: #FFFFFF !important; font-family: 'Circular', sans-serif; }
     
     .now-playing-box {
@@ -33,10 +34,7 @@ st.markdown("""
         border-radius: 8px !important;
         padding: 15px !important;
     }
-    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background-color: #222222 !important;
-    }
-
+    
     .stTextInput input {
         background-color: #2A2A2A !important;
         color: #FFFFFF !important;
@@ -57,7 +55,7 @@ st.markdown("""
         color: #FFFFFF !important;
         border: 1px solid #727272 !important;
     }
-    .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
+    audio { border-radius: 30px; height: 45px; width: 100%; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -66,8 +64,10 @@ if 'current_track' not in st.session_state:
     st.session_state.current_track = None
 if 'queue' not in st.session_state:
     st.session_state.queue = []
-if 'history' not in st.session_state:
-    st.session_state.history = []
+if 'track_start_time' not in st.session_state:
+    st.session_state.track_start_time = 0
+if 'track_duration_secs' not in st.session_state:
+    st.session_state.track_duration_secs = 0
 
 # --- MOTOR DE RECOMENDAÇÃO CONTÍNUA ---
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
@@ -84,12 +84,18 @@ def buscar_musicas_similares(termo_referencia, num_resultados=4):
             
             for entry in info['entries']:
                 if entry.get('title') not in nomes_bloqueados:
+                    # Converte a duração para segundos (ex: "3:45" -> 225)
+                    duration_str = entry.get('duration_string', '3:00')
+                    parts = list(map(int, duration_str.split(':')))
+                    secs = parts[0]*60 + parts[1] if len(parts) == 2 else parts[0]*3600 + parts[1]*60 + parts[2]
+                    
                     filtradas.append({
                         'title': entry.get('title'),
                         'url': entry.get('webpage_url'),
                         'stream_url': entry.get('url'),
                         'uploader': entry.get('uploader'),
-                        'duration': entry.get('duration_string'),
+                        'duration': duration_str,
+                        'duration_secs': secs,
                         'id': entry.get('id')
                     })
                 if len(filtradas) >= num_resultados:
@@ -100,12 +106,13 @@ def buscar_musicas_similares(termo_referencia, num_resultados=4):
     return []
 
 def tocar_faixa(track):
-    if st.session_state.current_track:
-        st.session_state.history.append(st.session_state.current_track)
     st.session_state.current_track = track
+    st.session_state.track_start_time = time.time()
+    st.session_state.track_duration_secs = track.get('duration_secs', 180)
     
-    novas_similares = buscar_musicas_similares(track['title'])
-    st.session_state.queue = novas_similares
+    # Busca as próximas da rádio
+    with st.spinner("Sintonizando próximas faixas da rádio..."):
+        st.session_state.queue = buscar_musicas_similares(track['title'])
     st.rerun()
 
 def avancar_fila():
@@ -113,26 +120,47 @@ def avancar_fila():
         proxima = st.session_state.queue.pop(0)
         tocar_faixa(proxima)
     else:
-        st.toast("Fim da playlist automática.", icon="🛑")
+        st.session_state.current_track = None
+        st.toast("Fim da rádio automática.", icon="🛑")
+        st.rerun()
 
-# --- INTERFACE ---
+# --- ATRAVESSADOR DE FILA AUTOMÁTICO (AUTOPLAY CONTROL) ---
+# Se tem uma música tocando, ativa o atualizador a cada 3 segundos
+if st.session_state.current_track:
+    st_autorefresh(interval=3000, key="track_timer")
+    
+    # Calcula quanto tempo passou desde o play
+    tempo_decorrido = time.time() - st.session_state.track_start_time
+    tempo_restante = st.session_state.track_duration_secs - tempo_decorrido
+    
+    # GATILHO DE AUTOPLAY: Se faltar menos de 2 segundos para acabar, passa para a próxima
+    if tempo_restante <= 2:
+        avancar_fila()
+
+# --- INTERFACE GRAPHICA ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
-st.caption("Streaming contínuo com Autoplay e Crossfade nativo no navegador.")
+st.caption("Modo rádio contínuo com transição garantida pelo servidor.")
 st.write("---")
 
-search_query = st.text_input("", placeholder="Digite uma música ou artista para iniciar a rádio...", label_visibility="collapsed")
+search_query = st.text_input("", placeholder="Digite uma combinação (Ex: zouk x forro) para iniciar...", label_visibility="collapsed")
 
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
-        with st.spinner("Sintonizando frequências..."):
+        with st.spinner("Buscando pontos de partida..."):
             ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                 info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
             if 'entries' in info_main and len(info_main['entries']) > 0:
-                st.session_state.main_search_results = [{
-                    'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
-                    'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
-                } for e in info_main['entries']]
+                results = []
+                for e in info_main['entries']:
+                    d_str = e.get('duration_string', '3:00')
+                    pts = list(map(int, d_str.split(':')))
+                    s = pts[0]*60 + pts[1] if len(pts) == 2 else 180
+                    results.append({
+                        'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
+                        'uploader': e.get('uploader'), 'duration': d_str, 'duration_secs': s, 'id': e.get('id')
+                    })
+                st.session_state.main_search_results = results
                 st.session_state.last_main_query = search_query
 
     if 'main_search_results' in st.session_state:
@@ -146,105 +174,52 @@ if search_query:
                     if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
                         tocar_faixa(track)
 
-# --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
+# --- PANEL DE CONTROLE ---
 if st.session_state.current_track:
     st.write("---")
-    
     col_player_left, col_queue_right = st.columns([6, 4])
     
     with col_player_left:
+        # Mostra barra de progresso aproximada
+        elapsed = min(time.time() - st.session_state.track_start_time, st.session_state.track_duration_secs)
+        pct = elapsed / st.session_state.track_duration_secs
+        
         st.markdown(f"""
             <div class="now-playing-box">
-                <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">TOCANDO AGORA VIA STREAMING</span>
-                <h2 style="margin-top: 5px; margin-bottom: 5px; font-size: 1.8rem;">{st.session_state.current_track['title']}</h2>
-                <span style="color: #B3B3B3;">Canal original: {st.session_state.current_track['uploader']} | Duração: {st.session_state.current_track['duration']}</span>
+                <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">RÁDIO ATIVA VIA STREAMING</span>
+                <h2 style="margin-top: 5px; margin-bottom: 5px; font-size: 1.6rem;">{st.session_state.current_track['title']}</h2>
+                <span style="color: #B3B3B3;">{st.session_state.current_track['uploader']}</span>
             </div>
         """, unsafe_allow_html=True)
         
-        # --- INJEÇÃO HTML5 + JAVASCRIPT: AUTOPLAY, FADE & TRIM SILÊNCIO ---
-        # Criamos um player customizado invisível/visível que controla o fluxo via JavaScript
-        src_audio = st.session_state.current_track['stream_url']
+        # Player nativo estável
+        st.audio(st.session_state.current_track['stream_url'], format="audio/mp4", autoplay=True)
+        st.progress(pct, text=f"Progresso da faixa: {int(elapsed)//60}:{int(elapsed)%60:02d} / {st.session_state.current_track['duration']}")
         
-        js_player_component = f"""
-        <div style="background-color: #181818; padding: 15px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
-            <audio id="audio-player" src="{src_audio}" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>
-        </div>
-
-        <script>
-            const audio = document.getElementById('audio-player');
-            let fadeTriggered = false;
-
-            // 1. CORTE DE SILÊNCIO (Garante início imediato se houver bloco em branco)
-            audio.addEventListener('canplaythrough', () => {{
-                // Se o áudio estiver travado no início em silêncio por erro de codec, pula para 0.5s
-                if (audio.currentTime < 0.5) {{
-                    // Opcional: Algumas transmissões começam com pequenos frames vazios
-                }}
-            }});
-
-            // 2. MONITORAMENTO DE TEMPO PARA TRANSICAO (FADE OUT)
-            audio.addEventListener('timeupdate', () => {{
-                const timeLeft = audio.duration - audio.currentTime;
-                
-                // Ativa o Fade-out faltando 4 segundos para acabar a música
-                if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
-                    fadeTriggered = true;
-                    fadeVolumeOut(audio);
-                }}
-            }});
-
-            function fadeVolumeOut(player) {{
-                let volume = player.volume;
-                const interval = setInterval(() => {{
-                    if (volume > 0.05) {{
-                        volume -= 0.05;
-                        player.volume = volume;
-                    }} else {{
-                        player.volume = 0;
-                        clearInterval(interval);
-                        // 3. EVENTO DE AUTOPLAY: Notifica o Streamlit para avançar
-                        window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
-                    }}
-                }}, 200); // Executa a redução a cada 200 milissegundos
-            }}
-        </script>
-        """
-        
-        # Renderiza o componente de áudio inteligente injetando o script acima
-        # Usamos uma altura fixa e capturamos a resposta se ele mandar 'NEXT_TRACK'
-        response = components.html(js_player_component, height=90)
-        
-        # Se o JavaScript avisou que a música acabou (ou entrou no fade zero), o Python avança!
-        # Nota: Como estamos lidando com a sandbox do Streamlit, usamos o botão de fallback se o postMessage falhar
-        
-        # Controles Manuais Alternativos
+        # Botão manual de Skip
         st.write("")
-        c1, c2, c3 = st.columns([2, 8, 2])
-        with c2:
-            if st.session_state.queue:
-                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
-            else:
-                texto_proxima = "Fim da Fila"
-                
-            st.markdown('<div class="btn-secondary">', unsafe_allow_html=True)
-            if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
-                avancar_fila()
-            st.markdown('</div>', unsafe_allow_html=True)
+        if st.session_state.queue:
+            texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:30]}..."
+        else:
+            texto_proxima = "Fim da Fila"
+            
+        st.markdown('<div class="btn-secondary">', unsafe_allow_html=True)
+        if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
+            avancar_fila()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # COLUNA 2: A FILA DINÂMICA
     with col_queue_right:
-        st.subheader("⏭️ A Seguir (Fila Automática)")
-        
+        st.subheader("⏭️ Próximas da Rádio Composta")
         if st.session_state.queue:
             for q_idx, q_track in enumerate(st.session_state.queue):
                 with st.container(border=True):
                     col_q_info, col_q_play = st.columns([8, 2])
                     with col_q_info:
-                        st.markdown(f"**{q_idx+1}. {q_track['title'][:45]}...**" if len(q_track['title']) > 45 else f"**{q_track['title']}**")
+                        st.markdown(f"**{q_track['title'][:45]}...**")
                         st.caption(f"{q_track['uploader']} • {q_track['duration']}")
                     with col_q_play:
                         if st.button("▶️", key=f"play_q_{q_track['id']}_{q_idx}"):
                             st.session_state.queue.pop(q_idx)
                             tocar_faixa(q_track)
         else:
-            st.write("Fila vazia.")
+            st.write("Mapeando contexto...")
