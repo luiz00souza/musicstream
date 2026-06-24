@@ -60,6 +60,7 @@ st.markdown("""
     }
     .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
     
+    /* Tag indicando a origem da recomendação */
     .priority-badge {
         font-size: 0.7rem;
         font-weight: bold;
@@ -83,24 +84,18 @@ if 'history' not in st.session_state:
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
-    
-    # Ajustado para extração estável sem forçar o download falso com pós-processador
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio', 
-        'extract_flat': False, 
-        'skip_download': True,
-        'force_generic_extractor': False
-    }    
+    ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
     
     # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
-    nome_artista = track['uploader']
+    nome_artista = track['uploader'] # Fallback inicial
     
     if " - " in titulo_original:
         nome_artista = titulo_original.split(" - ")[0].strip()
     elif " – " in titulo_original:
         nome_artista = titulo_original.split(" – ")[0].strip()
     
+    # Sanitização de sufixos de canais automáticos do YouTube
     termos_limpeza = [" - Topic", " Oficial", " Official", " VEVO", " Tema"]
     for termo in termos_limpeza:
         nome_artista = nome_artista.replace(termo, "")
@@ -186,12 +181,7 @@ search_query = st.text_input("", placeholder="Digite uma música, artista ou com
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            # Removidos argumentos conflitantes com extração flat/metadados rápidos
-            ydl_opts_main = {
-                'format': 'bestaudio[ext=m4a]/bestaudio', 
-                'extract_flat': False, 
-                'skip_download': True
-            }
+            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                 info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
             if 'entries' in info_main and len(info_main['entries']) > 0:
@@ -227,6 +217,7 @@ if st.session_state.current_track:
         """, unsafe_allow_html=True)
         
         # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
+        # Resolve o autoplay mantendo o mesmo elemento de áudio ativo no navegador
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -237,8 +228,6 @@ if st.session_state.current_track:
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
-        # O truque inteligente: injetamos o corte diretamente na reprodução via tag de áudio se necessário, 
-        # mas como estamos tocando o stream bruto direto das CDNs do YouTube, o navegador renderiza o buffer imediatamente.
         js_player_component = f"""
         <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
             <audio id="audio-player" src="{lista_streams[0]}" controls autoplay style="width: 100%; height: 40px;"></audio>
@@ -255,7 +244,6 @@ if st.session_state.current_track:
             const audio = document.getElementById('audio-player');
             const statusDiv = document.getElementById('player-status');
 
-            // Adiciona uma margem de segurança pequena para transição sem travar a thread principal
             audio.addEventListener('ended', () => {{
                 currentIdx++;
                 if (currentIdx < playlistTracks.length) {{
@@ -278,7 +266,7 @@ if st.session_state.current_track:
         
         components.html(js_player_component, height=130)
         
-        # --- BOTÕES DE AÇÃO SIMÉTRICOS ---
+        # --- BOTOÕES DE AÇÃO SIMÉTRICOS ---
         st.write("")
         c1, c2 = st.columns([1, 1])
         
@@ -318,7 +306,7 @@ if st.session_state.current_track:
             """
             components.html(botao_download_html, height=50)
 
-    # COLUNA 2: A FILA DINÂMICA
+    # COLUNA 2: A FILA DINÂMICA COM OS LABELS DE PRIORIDADE
     with col_queue_right:
         st.subheader("⏭️ A Seguir (Ordem de Afinidade)")
         
