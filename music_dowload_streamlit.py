@@ -125,9 +125,10 @@ search_query = st.text_input("", placeholder="Digite uma música ou artista para
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
+            # Alterado de ytsearch3 para ytsearch10 para trazer até 10 resultados
             ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
+                info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
             if 'entries' in info_main and len(info_main['entries']) > 0:
                 st.session_state.main_search_results = [{
                     'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
@@ -137,14 +138,25 @@ if search_query:
 
     if 'main_search_results' in st.session_state:
         st.subheader("🎯 Escolha o ponto de partida:")
-        cols_start = st.columns(3)
+        
+        # Exibição em formato de Lista vertical com tratamento de erros por item
         for idx, track in enumerate(st.session_state.main_search_results):
-            with cols_start[idx]:
+            try:
+                # Se faltar dados cruciais na track extraída do YT, pula silenciosamente
+                if not track.get('title') or not track.get('id'):
+                    continue
+                    
                 with st.container(border=True):
-                    st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
-                    st.caption(f"{track['uploader']} • {track['duration']}")
-                    if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
-                        tocar_faixa(track)
+                    col_info, col_btn = st.columns([8, 2])
+                    with col_info:
+                        st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
+                        st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
+                    with col_btn:
+                        if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
+                            tocar_faixa(track)
+            except Exception:
+                # Ignora o item caso dê qualquer erro inesperado ao renderizá-lo para a lista não quebrar
+                continue
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
@@ -161,8 +173,6 @@ if st.session_state.current_track:
             </div>
         """, unsafe_allow_html=True)
         
-        # --- INJEÇÃO HTML5 + JAVASCRIPT: AUTOPLAY, FADE & TRIM SILÊNCIO ---
-        # Criamos um player customizado invisível/visível que controla o fluxo via JavaScript
         src_audio = st.session_state.current_track['stream_url']
         
         js_player_component = f"""
@@ -174,19 +184,14 @@ if st.session_state.current_track:
             const audio = document.getElementById('audio-player');
             let fadeTriggered = false;
 
-            // 1. CORTE DE SILÊNCIO (Garante início imediato se houver bloco em branco)
             audio.addEventListener('canplaythrough', () => {{
-                // Se o áudio estiver travado no início em silêncio por erro de codec, pula para 0.5s
                 if (audio.currentTime < 0.5) {{
-                    // Opcional: Algumas transmissões começam com pequenos frames vazios
                 }}
             }});
 
-            // 2. MONITORAMENTO DE TEMPO PARA TRANSICAO (FADE OUT)
             audio.addEventListener('timeupdate', () => {{
                 const timeLeft = audio.duration - audio.currentTime;
                 
-                // Ativa o Fade-out faltando 4 segundos para acabar a música
                 if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
                     fadeTriggered = true;
                     fadeVolumeOut(audio);
@@ -202,22 +207,15 @@ if st.session_state.current_track:
                     }} else {{
                         player.volume = 0;
                         clearInterval(interval);
-                        // 3. EVENTO DE AUTOPLAY: Notifica o Streamlit para avançar
                         window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
                     }}
-                }}, 200); // Executa a redução a cada 200 milissegundos
+                }}, 200);
             }}
         </script>
         """
         
-        # Renderiza o componente de áudio inteligente injetando o script acima
-        # Usamos uma altura fixa e capturamos a resposta se ele mandar 'NEXT_TRACK'
         response = components.html(js_player_component, height=90)
         
-        # Se o JavaScript avisou que a música acabou (ou entrou no fade zero), o Python avança!
-        # Nota: Como estamos lidando com a sandbox do Streamlit, usamos o botão de fallback se o postMessage falhar
-        
-        # Controles Manuais Alternativos
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
         with c2:
