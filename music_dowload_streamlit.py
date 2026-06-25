@@ -72,20 +72,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURAÇÃO GLOBAL ANTI-BLOQUEIO (USANDO YTMUSIC E IOS CLIENT) ---
+# --- CONFIGURAÇÃO GLOBAL ANTI-BLOQUEIO PARA YT-DLP ---
+# Dicionário base reutilizável que camufla o backend do Streamlit como um navegador comum
 CONFIG_ANTI_BLOCK = {
     'nocheckcertificate': True,
     'ignoreerrors': True,
     'quiet': True,
     'no_warnings': True,
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,video/webm,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Sec-Fetch-Mode': 'navigate',
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['ios', 'android'], # Clientes mobile evitam detecção de bot
+            'player_client': ['android', 'web'],  # Alterna os clientes de API para burlar bot-detectors
             'skip': ['dash', 'hls']
         }
     }
@@ -99,11 +101,12 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO ---
+# --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO (ARTISTA REAL != CANAL) ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
     
+    # Unindo suas regras de formato m4a com a nossa configuração anti-bloqueio
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio', 
         'extract_flat': False, 
@@ -111,55 +114,69 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
         **CONFIG_ANTI_BLOCK
     }
     
+    # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
-    nome_artista = track['uploader']
+    nome_artista = track['uploader'] # Fallback inicial
     
     if " - " in titulo_original:
         nome_artista = titulo_original.split(" - ")[0].strip()
     elif " – " in titulo_original:
         nome_artista = titulo_original.split(" – ")[0].strip()
     
+    # Sanitização de sufixos de canais automáticos do YouTube
     termos_limpeza = [" - Topic", " Oficial", " Official", " VEVO", " Tema"]
     for termo in termos_limpeza:
         nome_artista = nome_artista.replace(termo, "")
     nome_artista = nome_artista.strip()
 
-    # Usamos o prefixo ytmusicsearch para buscar no banco de dados de música do YouTube
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         # --- PRIORIDADE 1: MESMO ÁLBUM ---
         try:
-            query_album = f"{nome_artista} {titulo_original} album"
-            info_album = ydl.extract_info(f"ytmusicsearch4:{query_album}", download=False)
-            if info_album and 'entries' in info_album:
+            query_album = f"{nome_artista} {titulo_original} album completo"
+            info_album = ydl.extract_info(f"ytsearch4:{query_album}", download=False)
+            if 'entries' in info_album:
                 for entry in info_album['entries']:
-                    if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                        url_stream = entry.get('url') or (entry.get('requested_formats')[0].get('url') if entry.get('requested_formats') else None)
-                        if url_stream:
-                            filtradas.append({
-                                'title': entry.get('title'), 'url': entry.get('webpage_url') or '', 'stream_url': url_stream,
-                                'uploader': entry.get('uploader') or nome_artista, 'duration': entry.get('duration_string') or '3:45', 'id': entry.get('id'),
-                                'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
-                            })
-                            nomes_bloqueados.append(entry.get('title'))
+                    if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                        filtradas.append({
+                            'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
+                            'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                            'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
+                        })
+                        nomes_bloqueados.append(entry.get('title'))
         except:
             pass
 
         # --- PRIORIDADE 2: MESMO ARTISTA REAL ---
         if len(filtradas) < num_resultados:
             try:
-                query_artista = f"{nome_artista} essentials"
-                info_artista = ydl.extract_info(f"ytmusicsearch5:{query_artista}", download=False)
-                if info_artista and 'entries' in info_artista:
+                query_artista = f"{nome_artista} top musicas"
+                info_artista = ydl.extract_info(f"ytsearch5:{query_artista}", download=False)
+                if 'entries' in info_artista:
                     for entry in info_artista['entries']:
-                        if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                            url_stream = entry.get('url') or (entry.get('requested_formats')[0].get('url') if entry.get('requested_formats') else None)
-                            if url_stream:
-                                filtradas.append({
-                                    'title': entry.get('title'), 'url': entry.get('webpage_url') or '', 'stream_url': url_stream,
-                                    'uploader': entry.get('uploader') or nome_artista, 'duration': entry.get('duration_string') or '3:30', 'id': entry.get('id'),
-                                    'tag': '👤 MESMO ARTISTA', 'tag_color': '#1DB954'
-                                })
-                                nomes_bloqueados.append(entry.get('title'))
+                        if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                            filtradas.append({
+                                'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
+                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                                'tag': '👤 MESMO ARTISTA', 'tag_color': '#1DB954'
+                            })
+                            nomes_bloqueados.append(entry.get('title'))
+            except:
+                pass
+
+        # --- PRIORIDADE 3: MESMA PLAYLIST / MIX ---
+        if len(filtradas) < num_resultados:
+            try:
+                query_mix = f"{titulo_original} mix musicas semelhantes"
+                info_mix = ydl.extract_info(f"ytsearch5:{query_mix}", download=False)
+                if 'entries' in info_mix:
+                    for entry in info_mix['entries']:
+                        if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                            filtradas.append({
+                                'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
+                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                                'tag': '🎶 MIX / PLAYLIST', 'tag_color': '#7D3CFF'
+                            })
+                            nomes_bloqueados.append(entry.get('title'))
             except:
                 pass
                 
@@ -184,64 +201,40 @@ def avancar_fila():
 
 # --- INTERFACE DO USUÁRIO ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
-st.caption("Streaming contínuo estruturado via YouTube Music Engine (Sem Bloqueios).")
+st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e Playlist.")
 st.write("---")
 
-search_query = st.text_input("", placeholder="Digite uma música, artista ou rádio (Ex: forro pé de serra, zouk)...", label_visibility="collapsed")
+search_query = st.text_input("", placeholder="Digite uma música, artista ou combinação (Ex: zouk x forro)...", label_visibility="collapsed")
 
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
-        with st.spinner("Buscando no acervo musical..."):
+        with st.spinner("Sintonizando frequências..."):
+            # Unindo sua busca inicial com as opções de cabeçalho anti-bloqueio
             ydl_opts_main = {
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
-                'extract_flat': False,
+                'extract_flat': False, 
                 'skip_download': True,
                 **CONFIG_ANTI_BLOCK
             }
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                try:
-                    # Mudamos a busca principal para o ecossistema do YouTube Music (ytmusicsearch)
-                    info_main = ydl.extract_info(f"ytmusicsearch3:{search_query}", download=False)
-                except Exception as e:
-                    st.error(f"Erro na busca: {e}")
-                    info_main = None
-
-            if info_main and isinstance(info_main, dict) and 'entries' in info_main:
-                resultados_temporarios = []
-                for idx, e in enumerate(info_main['entries']):
-                    if e and isinstance(e, dict):
-                        # Captura inteligente da URL de stream direta
-                        url_final_stream = e.get('url')
-                        if not url_final_stream and e.get('requested_formats'):
-                            url_final_stream = e['requested_formats'][0].get('url')
-
-                        if url_final_stream:
-                            resultados_temporarios.append({
-                                'title': e.get('title') or f"Faixa {idx+1}", 
-                                'url': e.get('webpage_url') or '', 
-                                'stream_url': url_final_stream,
-                                'uploader': e.get('uploader') or e.get('artists', ['Desconhecido'])[0], 
-                                'duration': e.get('duration_string') or '3:30', 
-                                'id': e.get('id') or f"fallback_{idx}"
-                            })
-                st.session_state.main_search_results = resultados_temporarios
+                info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
+            if 'entries' in info_main and len(info_main['entries']) > 0:
+                st.session_state.main_search_results = [{
+                    'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
+                    'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
+                } for e in info_main['entries']]
                 st.session_state.last_main_query = search_query
 
     if 'main_search_results' in st.session_state:
-        if not st.session_state.main_search_results:
-            st.warning("⚠️ Nenhum link de áudio limpo foi liberado para essa busca. Tente outro termo.")
-        else:
-            st.subheader("🎯 Escolha o ponto de partida:")
-            cols_start = st.columns(3)
-            for idx, track in enumerate(st.session_state.main_search_results):
-                if idx < len(cols_start):
-                    with cols_start[idx]:
-                        with st.container(border=True):
-                            st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
-                            st.caption(f"{track['uploader']} • {track['duration']}")
-                            
-                            if st.button("Iniciar Rádio aqui 📻", key=f"start_btn_{idx}_{track['id']}", use_container_width=True):
-                                tocar_faixa(track)
+        st.subheader("🎯 Escolha o ponto de partida:")
+        cols_start = st.columns(3)
+        for idx, track in enumerate(st.session_state.main_search_results):
+            with cols_start[idx]:
+                with st.container(border=True):
+                    st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
+                    st.caption(f"{track['uploader']} • {track['duration']}")
+                    if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
+                        tocar_faixa(track)
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
@@ -257,6 +250,7 @@ if st.session_state.current_track:
             </div>
         """, unsafe_allow_html=True)
         
+        # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -267,43 +261,41 @@ if st.session_state.current_track:
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
-        js_player_component = """
+        js_player_component = f"""
         <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
-            <audio id="audio-player" src="STREAM_INITIAL_URL" controls autoplay style="width: 100%; height: 40px;"></audio>
+            <audio id="audio-player" src="{lista_streams[0]}" controls autoplay style="width: 100%; height: 40px;"></audio>
             <div id="player-status" style="color: #1DB954; font-size: 0.85rem; font-family: sans-serif; margin-top: 10px; text-align: center; font-weight: bold;">
                 🔊 Tocando agora a faixa inicial
             </div>
         </div>
 
         <script>
-            const playlistTracks = JS_STREAMS_ARRAY;
-            const playlistTitles = JS_TITULOS_ARRAY;
+            const playlistTracks = {js_streams};
+            const playlistTitles = {js_titulos};
             let currentIdx = 0;
             
             const audio = document.getElementById('audio-player');
             const statusDiv = document.getElementById('player-status');
 
-            audio.addEventListener('ended', () => {
+            audio.addEventListener('ended', () => {{
                 currentIdx++;
-                if (currentIdx < playlistTracks.length) {
+                if (currentIdx < playlistTracks.length) {{
                     statusDiv.innerText = "⏭️ Transicionando automaticamente...";
                     audio.src = playlistTracks[currentIdx];
                     audio.load();
                     audio.play()
-                        .then(() => {
+                        .then(() => {{
                             statusDiv.innerHTML = "🔊 Tocando sequência: <br><span style='color:#fff; font-weight:normal;'>" + playlistTitles[currentIdx] + "</span>";
-                        })
-                        .catch(err => {
+                        }})
+                        .catch(err => {{
                             statusDiv.innerText = "❌ Clique no Play para continuar a sequência";
-                        });
-                } else {
+                        }});
+                } else {{
                     statusDiv.innerText = "🛑 Fim da sequência carregada.";
                 }
-            });
+            }});
         </script>
-        """.replace("STREAM_INITIAL_URL", lista_streams[0])\
-           .replace("JS_STREAMS_ARRAY", js_streams)\
-           .replace("JS_TITULOS_ARRAY", js_titulos)
+        """
         
         components.html(js_player_component, height=130)
         
@@ -347,7 +339,7 @@ if st.session_state.current_track:
             """
             components.html(botao_download_html, height=50)
 
-    # COLUNA 2: A FILA DINÂMICA
+    # COLUNA 2: A FILA DINÂMICA COM OS LABELS DE PRIORIDADE
     with col_queue_right:
         st.subheader("⏭️ A Seguir (Ordem de Afinidade)")
         
