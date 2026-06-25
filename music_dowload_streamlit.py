@@ -72,6 +72,27 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- CONFIGURAÇÃO GLOBAL ANTI-BLOQUEIO PARA YT-DLP ---
+# Dicionário base reutilizável que camufla o backend do Streamlit como um navegador comum
+CONFIG_ANTI_BLOCK = {
+    'nocheckcertificate': True,
+    'ignoreerrors': True,
+    'quiet': True,
+    'no_warnings': True,
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,video/webm,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Sec-Fetch-Mode': 'navigate',
+    },
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web'],  # Alterna os clientes de API para burlar bot-detectors
+            'skip': ['dash', 'hls']
+        }
+    }
+}
+
 # --- INICIALIZAÇÃO DOS ESTADOS DE SESSÃO ---
 if 'current_track' not in st.session_state:
     st.session_state.current_track = None
@@ -84,7 +105,14 @@ if 'history' not in st.session_state:
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
-    ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
+    
+    # Unindo suas regras de formato m4a com a nossa configuração anti-bloqueio
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio', 
+        'extract_flat': False, 
+        'skip_download': True,
+        **CONFIG_ANTI_BLOCK
+    }
     
     # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
@@ -181,7 +209,13 @@ search_query = st.text_input("", placeholder="Digite uma música, artista ou com
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
+            # Unindo sua busca inicial com as opções de cabeçalho anti-bloqueio
+            ydl_opts_main = {
+                'format': 'bestaudio[ext=m4a]/bestaudio', 
+                'extract_flat': False, 
+                'skip_download': True,
+                **CONFIG_ANTI_BLOCK
+            }
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                 info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
             if 'entries' in info_main and len(info_main['entries']) > 0:
@@ -217,7 +251,6 @@ if st.session_state.current_track:
         """, unsafe_allow_html=True)
         
         # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
-        # Resolve o autoplay mantendo o mesmo elemento de áudio ativo no navegador
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -257,16 +290,16 @@ if st.session_state.current_track:
                         .catch(err => {{
                             statusDiv.innerText = "❌ Clique no Play para continuar a sequência";
                         }});
-                }} else {{
+                } else {{
                     statusDiv.innerText = "🛑 Fim da sequência carregada.";
-                }}
+                }
             }});
         </script>
         """
         
         components.html(js_player_component, height=130)
         
-        # --- BOTOÕES DE AÇÃO SIMÉTRICOS ---
+        # --- BOTÕES DE AÇÃO SIMÉTRICOS ---
         st.write("")
         c1, c2 = st.columns([1, 1])
         
