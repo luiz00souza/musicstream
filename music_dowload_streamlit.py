@@ -205,11 +205,9 @@ st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e 
 st.write("---")
 
 search_query = st.text_input("", placeholder="Digite uma música, artista ou combinação (Ex: zouk x forro)...", label_visibility="collapsed")
-
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            # Unindo sua busca inicial com as opções de cabeçalho anti-bloqueio
             ydl_opts_main = {
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
@@ -217,13 +215,28 @@ if search_query:
                 **CONFIG_ANTI_BLOCK
             }
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
-            if 'entries' in info_main and len(info_main['entries']) > 0:
-                st.session_state.main_search_results = [{
-                    'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
-                    'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
-                } for e in info_main['entries']]
+                try:
+                    info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
+                except Exception as e:
+                    st.error(f"Erro na busca: {e}")
+                    info_main = None
+
+            # CRIAÇÃO SEGURA DA LISTA: Valida se info_main existe, tem entries e se cada e é um dicionário
+            if info_main and isinstance(info_main, dict) and 'entries' in info_main:
+                st.session_state.main_search_results = [
+                    {
+                        'title': e.get('title') or 'Faixa sem título', 
+                        'url': e.get('webpage_url') or '', 
+                        'stream_url': e.get('url') or '',
+                        'uploader': e.get('uploader') or 'Desconhecido', 
+                        'duration': e.get('duration_string') or '0:00', 
+                        'id': e.get('id') or f"fallback_{idx}"
+                    } 
+                    for idx, e in enumerate(info_main['entries']) 
+                    if isinstance(e, dict)  # Garante que o item não é None ou uma String solta
+                ]
                 st.session_state.last_main_query = search_query
+
 
     if 'main_search_results' in st.session_state:
         st.subheader("🎯 Escolha o ponto de partida:")
