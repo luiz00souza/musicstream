@@ -134,14 +134,13 @@ if search_query:
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
                 'skip_download': True,
-                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+                'ignoreerrors': True
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                     info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
-                    # Filtra possíveis 'None' gerados por vídeos que falharam
                     st.session_state.main_search_results = [{
                         'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
                         'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
@@ -149,15 +148,14 @@ if search_query:
                     st.session_state.last_main_query = search_query
                 else:
                     st.session_state.main_search_results = []
-                    st.warning("Nenhum resultado válido encontrado para esta busca.")
+                    st.warning("Nenhum resultado válido encontrado.")
             except Exception:
-                st.error("Erro de conexão ao buscar no YouTube. Tente novamente em alguns segundos.")
                 st.session_state.main_search_results = []
 
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
-        # Exibição em lista vertical protegida
+        # Lista vertical de 10 possibilidades imune a falhas
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
                 if not track or not track.get('title') or not track.get('id'):
@@ -174,7 +172,7 @@ if search_query:
             except Exception:
                 continue
 
-# --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
+# --- PAINEL DO PLAYER DE ÁUDIO CONTÍNUO ---
 if st.session_state.current_track:
     st.write("---")
     
@@ -200,11 +198,7 @@ if st.session_state.current_track:
             const audio = document.getElementById('audio-player');
             let fadeTriggered = false;
 
-            audio.addEventListener('canplaythrough', () => {{
-                if (audio.currentTime < 0.5) {{
-                }}
-            }});
-
+            // Monitoramento para transição automática via PostMessage estável
             audio.addEventListener('timeupdate', () => {{
                 const timeLeft = audio.duration - audio.currentTime;
                 
@@ -212,6 +206,11 @@ if st.session_state.current_track:
                     fadeTriggered = true;
                     fadeVolumeOut(audio);
                 }}
+            }});
+
+            // Fallback imediato se o player travar ou terminar abruptamente
+            audio.addEventListener('ended', () => {{
+                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
             }});
 
             function fadeVolumeOut(player) {{
@@ -230,8 +229,13 @@ if st.session_state.current_track:
         </script>
         """
         
-        response = components.html(js_player_component, height=90)
+        # O valor de retorno do componente captura a instrução enviada do navegador
+        player_event = components.html(js_player_component, height=90)
         
+        # Aciona o avanço da rádio se o JavaScript enviar o sinal
+        if player_event == 'NEXT_TRACK':
+            avancar_fila()
+            
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
         with c2:
