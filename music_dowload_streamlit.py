@@ -71,7 +71,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURAÇÃO ANTIBLOQUEIO (EMULA CLIENTE MÓVEL E YOUTUBE MUSIC) ---
+# --- CONFIGURAÇÃO ANTIBLOQUEIO (EMULA CLIENTE MÓVEL SÓLIDO) ---
 CONFIG_ANTI_BLOCK = {
     'nocheckcertificate': True,
     'ignoreerrors': True,
@@ -84,7 +84,7 @@ CONFIG_ANTI_BLOCK = {
     },
     'extractor_args': {
         'youtube': {
-            'player_client': ['ios', 'android'],  # Ignora restrições do cliente web tradicional
+            'player_client': ['ios', 'android'],  # Burlar restrição de data center do Streamlit Cloud
             'skip': ['dash', 'hls']
         }
     }
@@ -98,7 +98,7 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# --- MOTOR DE RECOMENDAÇÃO CONTÍNUA (YOUTUBE MUSIC ENGINE) ---
+# --- MOTOR DE RECOMENDAÇÃO CONTÍNUA ---
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
     try:
         query = f"{termo_referencia} mix"
@@ -109,8 +109,8 @@ def buscar_musicas_similares(termo_referencia, num_resultados=4):
             **CONFIG_ANTI_BLOCK
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Busca no acervo específico de música
-            info = ydl.extract_info(f"ytmusicsearch5:{query}", download=False)
+            # Usando o padrão estável 'ytsearch' para evitar erros de esquema
+            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
             
         if info and 'entries' in info and len(info['entries']) > 0:
             filtradas = []
@@ -125,7 +125,7 @@ def buscar_musicas_similares(termo_referencia, num_resultados=4):
                             'title': entry.get('title'),
                             'url': entry.get('webpage_url') or '',
                             'stream_url': url_stream,
-                            'uploader': entry.get('uploader') or entry.get('artists', ['Desconhecido'])[0],
+                            'uploader': entry.get('uploader') or 'Desconhecido',
                             'duration': entry.get('duration_string') or '3:30',
                             'id': entry.get('id') or f"sim_{len(filtradas)}",
                             'tag': '🎶 RÁDIO SIMILAR', 'tag_color': '#7D3CFF'
@@ -156,14 +156,14 @@ def avancar_fila():
 
 # --- INTERFACE ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
-st.caption("Streaming contínuo via YouTube Music (Proteção contra Bloqueios ativa).")
+st.caption("Streaming contínuo com Autoplay e Crossfade nativo no navegador.")
 st.write("---")
 
 search_query = st.text_input("", placeholder="Digite uma música ou artista para iniciar a rádio...", label_visibility="collapsed")
 
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
-        with st.spinner("Buscando no ecossistema musical..."):
+        with st.spinner("Sintonizando frequências..."):
             ydl_opts_main = {
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
@@ -172,7 +172,7 @@ if search_query:
             }
             with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                 try:
-                    info_main = ydl.extract_info(f"ytmusicsearch3:{search_query}", download=False)
+                    info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
                 except Exception as e:
                     st.error(f"Erro na extração de dados: {e}")
                     info_main = None
@@ -190,7 +190,7 @@ if search_query:
                                 'title': e.get('title'), 
                                 'url': e.get('webpage_url') or '', 
                                 'stream_url': url_final_stream,
-                                'uploader': e.get('uploader') or e.get('artists', ['Desconhecido'])[0], 
+                                'uploader': e.get('uploader') or 'Desconhecido', 
                                 'duration': e.get('duration_string') or '3:30', 
                                 'id': e.get('id') or f"idx_{idx}"
                             })
@@ -199,7 +199,7 @@ if search_query:
 
     if 'main_search_results' in st.session_state:
         if not st.session_state.main_search_results:
-            st.warning("⚠️ O servidor recusou a requisição padrão. Modifique levemente o termo pesquisado.")
+            st.warning("⚠️ O YouTube ocultou os links diretos para este termo. Tente mudar um pouco o texto da busca.")
         else:
             st.subheader("🎯 Escolha o ponto de partida:")
             cols_start = st.columns(3)
@@ -209,7 +209,7 @@ if search_query:
                         with st.container(border=True):
                             st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
                             st.caption(f"{track['uploader']} • {track['duration']}")
-                            # Correção de Key duplicada injetando o idx numérico na string do botão
+                            # Chave corrigida com idx e track['id'] para evitar Duplicate Widget ID
                             if st.button("Iniciar Rádio aqui 📻", key=f"start_btn_{idx}_{track['id']}", use_container_width=True):
                                 tocar_faixa(track)
 
@@ -223,7 +223,7 @@ if st.session_state.current_track:
             <div class="now-playing-box">
                 <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">TOCANDO AGORA VIA STREAMING</span>
                 <h2 style="margin-top: 5px; margin-bottom: 5px; font-size: 1.6rem;">{st.session_state.current_track['title']}</h2>
-                <span style="color: #B3B3B3;">Artista: {st.session_state.current_track['uploader']} | Duração: {st.session_state.current_track['duration']}</span>
+                <span style="color: #B3B3B3;">Canal original: {st.session_state.current_track['uploader']} | Duração: {st.session_state.current_track['duration']}</span>
             </div>
         """, unsafe_allow_html=True)
         
@@ -299,6 +299,7 @@ if st.session_state.current_track:
                         width: 100%; background-color: #282828; color: #FFFFFF;
                         border: 1px solid #727272; border-radius: 50px; padding: 10px 24px;
                         font-weight: bold; cursor: pointer; font-family: sans-serif; font-size: 14px;
+                        width: 100%; height: 40px;
                     ">📥 Baixar Faixa (.m4a)</button>
                 </a>
             """
