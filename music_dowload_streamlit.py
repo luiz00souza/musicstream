@@ -134,9 +134,9 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
         try:
             query_album = f"{nome_artista} {titulo_original} album completo"
             info_album = ydl.extract_info(f"ytsearch4:{query_album}", download=False)
-            if 'entries' in info_album:
+            if info_album and 'entries' in info_album:
                 for entry in info_album['entries']:
-                    if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                    if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                         filtradas.append({
                             'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
                             'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
@@ -151,9 +151,9 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
             try:
                 query_artista = f"{nome_artista} top musicas"
                 info_artista = ydl.extract_info(f"ytsearch5:{query_artista}", download=False)
-                if 'entries' in info_artista:
+                if info_artista and 'entries' in info_artista:
                     for entry in info_artista['entries']:
-                        if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                        if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
                                 'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
@@ -168,9 +168,9 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
             try:
                 query_mix = f"{titulo_original} mix musicas semelhantes"
                 info_mix = ydl.extract_info(f"ytsearch5:{query_mix}", download=False)
-                if 'entries' in info_mix:
+                if info_mix and 'entries' in info_mix:
                     for entry in info_mix['entries']:
-                        if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
+                        if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
                                 'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
@@ -205,6 +205,7 @@ st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e 
 st.write("---")
 
 search_query = st.text_input("", placeholder="Digite uma música, artista ou combinação (Ex: zouk x forro)...", label_visibility="collapsed")
+
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
@@ -236,7 +237,6 @@ if search_query:
                     if isinstance(e, dict)  # Garante que o item não é None ou uma String solta
                 ]
                 st.session_state.last_main_query = search_query
-
 
     if 'main_search_results' in st.session_state:
         st.subheader("🎯 Escolha o ponto de partida:")
@@ -274,41 +274,44 @@ if st.session_state.current_track:
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
+        # String limpa sem o 'f' (evita conflitos sintáticos do interpretador Python com chaves de JS)
         js_player_component = """
         <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
-            <audio id="audio-player" src="{lista_streams[0]}" controls autoplay style="width: 100%; height: 40px;"></audio>
+            <audio id="audio-player" src="STREAM_INITIAL_URL" controls autoplay style="width: 100%; height: 40px;"></audio>
             <div id="player-status" style="color: #1DB954; font-size: 0.85rem; font-family: sans-serif; margin-top: 10px; text-align: center; font-weight: bold;">
                 🔊 Tocando agora a faixa inicial
             </div>
         </div>
 
         <script>
-            const playlistTracks = {js_streams};
-            const playlistTitles = {js_titulos};
+            const playlistTracks = JS_STREAMS_ARRAY;
+            const playlistTitles = JS_TITULOS_ARRAY;
             let currentIdx = 0;
             
             const audio = document.getElementById('audio-player');
             const statusDiv = document.getElementById('player-status');
 
-            audio.addEventListener('ended', () => {{
+            audio.addEventListener('ended', () => {
                 currentIdx++;
-                if (currentIdx < playlistTracks.length) {{
+                if (currentIdx < playlistTracks.length) {
                     statusDiv.innerText = "⏭️ Transicionando automaticamente...";
                     audio.src = playlistTracks[currentIdx];
                     audio.load();
                     audio.play()
-                        .then(() => {{
+                        .then(() => {
                             statusDiv.innerHTML = "🔊 Tocando sequência: <br><span style='color:#fff; font-weight:normal;'>" + playlistTitles[currentIdx] + "</span>";
-                        }})
-                        .catch(err => {{
+                        })
+                        .catch(err => {
                             statusDiv.innerText = "❌ Clique no Play para continuar a sequência";
-                        }});
-                } else {{
+                        });
+                } else {
                     statusDiv.innerText = "🛑 Fim da sequência carregada.";
                 }
-            }});
+            });
         </script>
-        """
+        """.replace("STREAM_INITIAL_URL", lista_streams[0])\
+           .replace("JS_STREAMS_ARRAY", js_streams)\
+           .replace("JS_TITULOS_ARRAY", js_titulos)
         
         components.html(js_player_component, height=130)
         
