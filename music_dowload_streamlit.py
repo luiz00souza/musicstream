@@ -261,7 +261,7 @@ if st.session_state.current_track:
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
-        js_player_component = f"""
+        js_player_component = """
         <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
             <audio id="audio-player" src="{lista_streams[0]}" controls autoplay style="width: 100%; height: 40px;"></audio>
             <div id="player-status" style="color: #1DB954; font-size: 0.85rem; font-family: sans-serif; margin-top: 10px; text-align: center; font-weight: bold;">
