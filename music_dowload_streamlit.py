@@ -7,7 +7,7 @@ import yt_dlp
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="SpotPy - Continuous Streaming", 
+    page_title="SpotPy - Infinite Radio Mode", 
     page_icon="🎵", 
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -61,6 +61,8 @@ st.markdown("""
     }
     .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
     
+    audio { border-radius: 30px; height: 45px; width: 100%; margin-top: 10px; }
+    
     /* Tag indicando a origem da recomendação */
     .priority-badge {
         font-size: 0.7rem;
@@ -69,7 +71,6 @@ st.markdown("""
         border-radius: 4px;
         margin-bottom: 5px;
         display: inline-block;
-        color: #FFFFFF;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -86,84 +87,77 @@ if 'track_start_time' not in st.session_state:
 if 'track_duration_secs' not in st.session_state:
     st.session_state.track_duration_secs = 0
 
-# --- FUNÇÃO AUXILIAR DE CONVERSÃO DE TEMPO ---
-def converter_duracao_segundos(duration_str):
-    try:
-        if not duration_str:
-            return 180
-        parts = list(map(int, duration_str.split(':')))
-        if len(parts) == 2:
-            return parts[0] * 60 + parts[1]
-        elif len(parts) == 3:
-            return parts[0] * 3600 + parts[1] * 60 + parts[2]
-        return int(duration_str)
-    except:
+# --- FUNÇÕES AUXILIARES ---
+def parse_duration(duration_str):
+    """Converte string de duração (ex: '3:45') para segundos."""
+    if not duration_str:
         return 180
+    parts = list(map(int, duration_str.split(':')))
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    elif len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return 180
 
 # --- MOTOR DE RECOMENDAÇÃO HIERÁRQUICO COM PRIORIDADES ---
 def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
-    nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio', 
-        'extract_flat': False, 
-        'skip_download': True,
-        'ignoreerrors': True
-    }
+    nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue] + [t['title'] for t in st.session_state.history]
+    ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True, 'ignoreerrors': True}
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         # --- PRIORIDADE 1: MESMO ÁLBUM ---
         try:
             query_album = f"{track['title']} album completo"
-            info_album = ydl.extract_info(f"ytsearch3:{query_album}", download=False)
+            info_album = ydl.extract_info(f"ytsearch4:{query_album}", download=False)
             if info_album and 'entries' in info_album:
                 for entry in filter(None, info_album['entries']):
                     if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                        if track.get('uploader', '').lower() in entry.get('uploader', '').lower():
-                            d_str = entry.get('duration_string', '3:00')
+                        if track['uploader'].lower() in entry.get('uploader', '').lower():
+                            dur_str = entry.get('duration_string', '3:00')
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': d_str, 'duration_secs': converter_duracao_segundos(d_str), 
+                                'uploader': entry.get('uploader'), 'duration': dur_str, 'duration_secs': parse_duration(dur_str),
                                 'id': entry.get('id'), 'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
                             })
                             nomes_bloqueados.append(entry.get('title'))
-        except:
+        except Exception:
             pass
 
         # --- PRIORIDADE 2: MESMO ARTISTA (Fallback) ---
         if len(filtradas) < num_resultados:
             try:
-                query_artista = f"{track.get('uploader', '')} top musicas"
-                info_artista = ydl.extract_info(f"ytsearch4:{query_artista}", download=False)
+                query_artista = f"{track['uploader']} top musicas"
+                info_artista = ydl.extract_info(f"ytsearch5:{query_artista}", download=False)
                 if info_artista and 'entries' in info_artista:
                     for entry in filter(None, info_artista['entries']):
                         if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                            d_str = entry.get('duration_string', '3:00')
+                            dur_str = entry.get('duration_string', '3:00')
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': d_str, 'duration_secs': converter_duracao_segundos(d_str), 
+                                'uploader': entry.get('uploader'), 'duration': dur_str, 'duration_secs': parse_duration(dur_str),
                                 'id': entry.get('id'), 'tag': '👤 MESMO ARTISTA', 'tag_color': '#1DB954'
                             })
                             nomes_bloqueados.append(entry.get('title'))
-            except:
+            except Exception:
                 pass
 
         # --- PRIORIDADE 3: MESMA PLAYLIST / MIX (Último recurso) ---
         if len(filtradas) < num_resultados:
             try:
                 query_mix = f"{track['title']} mix musicas semelhantes"
-                info_mix = ydl.extract_info(f"ytsearch4:{query_mix}", download=False)
+                info_mix = ydl.extract_info(f"ytsearch5:{query_mix}", download=False)
                 if info_mix and 'entries' in info_mix:
                     for entry in filter(None, info_mix['entries']):
                         if entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
-                            d_str = entry.get('duration_string', '3:00')
+                            dur_str = entry.get('duration_string', '3:00')
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': d_str, 'duration_secs': converter_duracao_segundos(d_str), 
+                                'uploader': entry.get('uploader'), 'duration': dur_str, 'duration_secs': parse_duration(dur_str),
                                 'id': entry.get('id'), 'tag': '🎶 MIX / PLAYLIST', 'tag_color': '#7D3CFF'
                             })
                             nomes_bloqueados.append(entry.get('title'))
-            except:
+            except Exception:
                 pass
                 
     return filtradas
@@ -171,13 +165,13 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
 def tocar_faixa(track):
     if st.session_state.current_track:
         st.session_state.history.append(st.session_state.current_track)
+    
     st.session_state.current_track = track
     st.session_state.track_start_time = time.time()
     st.session_state.track_duration_secs = track.get('duration_secs', 180)
 
-    with st.spinner("Analisando prioridades de reprodução por afinidade..."):
-        novas_similares = buscar_musicas_hierarquicas(track)
-    st.session_state.queue = novas_similares
+    with st.spinner("Analisando prioridades de reprodução e sintonizando próximas faixas..."):
+        st.session_state.queue = buscar_musicas_hierarquicas(track)
     st.rerun()
 
 def avancar_fila():
@@ -189,36 +183,31 @@ def avancar_fila():
         st.toast("Fim da rádio automática.", icon="🛑")
         st.rerun()
 
-# --- REFRESH E MONITORAMENTO BACKEND (SERVER-SIDE GATILHO) ---
+# --- ATRAVESSADOR DE FILA AUTOMÁTICO (AUTOPLAY CONTROL) ---
 if st.session_state.current_track:
     st_autorefresh(interval=3000, key="track_timer")
     
     tempo_decorrido = time.time() - st.session_state.track_start_time
     tempo_restante = st.session_state.track_duration_secs - tempo_decorrido
     
-    # Se faltar menos de 2 segundos no relógio do servidor, avança preemptivamente
+    # GATILHO DE AUTOPLAY: Se faltar menos de 2 segundos para acabar, passa para a próxima
     if tempo_restante <= 2:
         avancar_fila()
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
-st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e Playlist com transição híbrida.")
+st.caption("Streaming contínuo estruturado por prioridade de Álbum, Artista e Playlist, com Crossfade nativo no navegador.")
 st.write("---")
 
-search_query = st.text_input("", placeholder="Digite uma música ou artista para iniciar a rádio...", label_visibility="collapsed")
+search_query = st.text_input("", placeholder="Digite uma combinação (Ex: zouk x forro) ou um artista para iniciar...", label_visibility="collapsed")
 
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
-        with st.spinner("Sintonizando frequências..."):
-            ydl_opts_main = {
-                'format': 'bestaudio[ext=m4a]/bestaudio', 
-                'extract_flat': False, 
-                'skip_download': True,
-                'ignoreerrors': True
-            }
+        with st.spinner("Buscando pontos de partida..."):
+            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True, 'ignoreerrors': True}
             try:
                 with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                    info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
+                    info_main = ydl.extract_info(f"ytsearch5:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
                     results = []
@@ -226,8 +215,7 @@ if search_query:
                         d_str = e.get('duration_string', '3:00')
                         results.append({
                             'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
-                            'uploader': e.get('uploader'), 'duration': d_str, 
-                            'duration_secs': converter_duracao_segundos(d_str), 'id': e.get('id')
+                            'uploader': e.get('uploader'), 'duration': d_str, 'duration_secs': parse_duration(d_str), 'id': e.get('id')
                         })
                     st.session_state.main_search_results = results
                     st.session_state.last_main_query = search_query
@@ -235,34 +223,30 @@ if search_query:
                     st.session_state.main_search_results = []
                     st.warning("Nenhum resultado válido encontrado para esta busca.")
             except Exception:
-                st.error("Erro de conexão ao buscar no YouTube. Tente novamente.")
+                st.error("Erro de conexão ao buscar no YouTube. Tente novamente em alguns segundos.")
                 st.session_state.main_search_results = []
 
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
-        
         for idx, track in enumerate(st.session_state.main_search_results):
-            try:
-                if not track or not track.get('title') or not track.get('id'):
-                    continue
-                with st.container(border=True):
-                    col_info, col_btn = st.columns([8, 2])
-                    with col_info:
-                        st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
-                        st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
-                    with col_btn:
-                        if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
-                            tocar_faixa(track)
-            except Exception:
-                continue
+            with st.container(border=True):
+                col_info, col_btn = st.columns([8, 2])
+                with col_info:
+                    st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
+                    st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
+                with col_btn:
+                    if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
+                        tocar_faixa(track)
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
     st.write("---")
-    
     col_player_left, col_queue_right = st.columns([6, 4])
     
     with col_player_left:
+        elapsed = min(time.time() - st.session_state.track_start_time, st.session_state.track_duration_secs)
+        pct = elapsed / st.session_state.track_duration_secs if st.session_state.track_duration_secs > 0 else 0
+        
         st.markdown(f"""
             <div class="now-playing-box">
                 <span style="color: #1DB954; font-size: 0.8rem; font-weight: bold; letter-spacing: 2px;">TOCANDO AGORA VIA STREAMING</span>
@@ -271,16 +255,12 @@ if st.session_state.current_track:
             </div>
         """, unsafe_allow_html=True)
         
-        # Exibição do progresso aproximado calculado no backend
-        elapsed = min(time.time() - st.session_state.track_start_time, st.session_state.track_duration_secs)
-        pct = elapsed / st.session_state.track_duration_secs if st.session_state.track_duration_secs > 0 else 0.0
-        st.progress(min(float(pct), 1.0), text=f"Progresso estimado: {int(elapsed)//60}:{int(elapsed)%60:02d} / {st.session_state.current_track['duration']}")
+        st.progress(pct, text=f"Progresso da faixa: {int(elapsed)//60}:{int(elapsed)%60:02d} / {st.session_state.current_track['duration']}")
         
-        # --- PLAYER HTML5 + JS (FADE OUT & TRANSMISSÃO FRONTEND) ---
+        # --- INJEÇÃO HTML5 + JAVASCRIPT: AUTOPLAY & FADE OUT ---
         src_audio = st.session_state.current_track['stream_url']
-        
         js_player_component = f"""
-        <div style="background-color: #181818; padding: 15px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
+        <div style="background-color: #181818; padding: 10px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
             <audio id="audio-player" src="{src_audio}" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>
         </div>
 
@@ -290,8 +270,6 @@ if st.session_state.current_track:
 
             audio.addEventListener('timeupdate', () => {{
                 const timeLeft = audio.duration - audio.currentTime;
-                
-                // Ativa o Fade-out faltando 4 segundos para acabar a mídia no navegador
                 if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
                     fadeTriggered = true;
                     fadeVolumeOut(audio);
@@ -307,20 +285,14 @@ if st.session_state.current_track:
                     }} else {{
                         player.volume = 0;
                         clearInterval(interval);
-                        // Envia comando para o Streamlit avançar a faixa via Component Value
-                        window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
                     }}
                 }}, 200);
             }}
         </script>
         """
+        components.html(js_player_component, height=80)
         
-        response = components.html(js_player_component, height=90)
-        
-        # Se o gatilho Javascript responder com sucesso antes do backend, passa a música por aqui
-        if response == 'NEXT_TRACK':
-            avancar_fila()
-        
+        # Controles Manuais
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
         with c2:
@@ -334,7 +306,7 @@ if st.session_state.current_track:
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # COLUNA 2: A FILA DINÂMICA COM OS BADGES DE PRIORIDADE
+    # COLUNA DIREITA: A FILA DINÂMICA
     with col_queue_right:
         st.subheader("⏭️ A Seguir (Ordem de Afinidade)")
         
@@ -343,11 +315,10 @@ if st.session_state.current_track:
                 with st.container(border=True):
                     col_q_info, col_q_play = st.columns([8, 2])
                     with col_q_info:
-                        # Emite o badge colorido baseado no nível de prioridade mapeado
-                        tag_label = q_track.get('tag', '🎶 RÁDIO SIMILAR')
-                        tag_color = q_track.get('tag_color', '#7D3CFF')
-                        st.markdown(f'<span class="priority-badge" style="background-color: {tag_color};">{tag_label}</span>', unsafe_allow_html=True)
+                        tag = q_track.get('tag', '🎵 SIMILAR')
+                        tag_color = q_track.get('tag_color', '#B3B3B3')
                         
+                        st.markdown(f'<span class="priority-badge" style="background-color: {tag_color};">{tag}</span>', unsafe_allow_html=True)
                         st.markdown(f"**{q_track['title'][:45]}...**" if len(q_track['title']) > 45 else f"**{q_track['title']}**")
                         st.caption(f"{q_track['uploader']} • {q_track['duration']}")
                     with col_q_play:
@@ -355,4 +326,4 @@ if st.session_state.current_track:
                             st.session_state.queue.pop(q_idx)
                             tocar_faixa(q_track)
         else:
-            st.write("Fila vazia.")
+            st.write("Fila vazia. O motor pode estar buscando novas faixas...")
