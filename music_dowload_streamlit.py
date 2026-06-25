@@ -69,21 +69,17 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# Opções padrão do yt-dlp otimizadas para stream limpo e m4a direto
-YDL_COMMON_OPTS = {
-    'format': 'bestaudio[ext=m4a]/bestaudio', # Força m4a/áudio puro compatível com download de navegador
-    'extract_flat': False, 
-    'skip_download': True,
-    'ignoreerrors': True,
-    'nocheckcertificate': True,
-    'rm_cached_metadata': True
-}
-
 # --- MOTOR DE RECOMENDAÇÃO CONTÍNUA ---
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
     try:
         query = f"{termo_referencia} mix musicas semelhantes"
-        with yt_dlp.YoutubeDL(YDL_COMMON_OPTS) as ydl:
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio', 
+            'extract_flat': False, 
+            'skip_download': True,
+            'ignoreerrors': True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch6:{query}", download=False)
             
         if info and 'entries' in info and len(info['entries']) > 0:
@@ -134,11 +130,18 @@ search_query = st.text_input("", placeholder="Digite uma música ou artista para
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
+            ydl_opts_main = {
+                'format': 'bestaudio[ext=m4a]/bestaudio', 
+                'extract_flat': False, 
+                'skip_download': True,
+                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+            }
             try:
-                with yt_dlp.YoutubeDL(YDL_COMMON_OPTS) as ydl:
+                with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                     info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
+                    # Filtra possíveis 'None' gerados por vídeos que falharam
                     st.session_state.main_search_results = [{
                         'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
                         'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
@@ -154,6 +157,7 @@ if search_query:
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
+        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
                 if not track or not track.get('title') or not track.get('id'):
@@ -187,7 +191,6 @@ if st.session_state.current_track:
         
         src_audio = st.session_state.current_track['stream_url']
         
-        # O atributo controlsList foi removido/ajustado para garantir que o nodownload NÃO seja ativado
         js_player_component = f"""
         <div style="background-color: #181818; padding: 15px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
             <audio id="audio-player" src="{src_audio}" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>
