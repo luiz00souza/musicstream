@@ -211,7 +211,7 @@ if search_query:
         with st.spinner("Sintonizando frequências..."):
             ydl_opts_main = {
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
-                'extract_flat': False, 
+                'extract_flat': True,  # Mudamos para True na busca inicial para vir rápido e leve
                 'skip_download': True,
                 **CONFIG_ANTI_BLOCK
             }
@@ -219,24 +219,39 @@ if search_query:
                 try:
                     info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
                 except Exception as e:
-                    st.error(f"Erro na busca: {e}")
+                    st.error(f"Erro na rede do backend: {e}")
                     info_main = None
 
-            # CRIAÇÃO SEGURA DA LISTA: Valida se info_main existe, tem entries e se cada e é um dicionário
+            # EXTRAÇÃO FLEXÍVEL: Aceita os dados mesmo se a estrutura de metadados for parcial
             if info_main and isinstance(info_main, dict) and 'entries' in info_main:
-                st.session_state.main_search_results = [
-                    {
-                        'title': e.get('title') or 'Faixa sem título', 
-                        'url': e.get('webpage_url') or '', 
-                        'stream_url': e.get('url') or '',
-                        'uploader': e.get('uploader') or 'Desconhecido', 
-                        'duration': e.get('duration_string') or '0:00', 
-                        'id': e.get('id') or f"fallback_{idx}"
-                    } 
-                    for idx, e in enumerate(info_main['entries']) 
-                    if isinstance(e, dict)  # Garante que o item não é None ou uma String solta
-                ]
+                resultados_temporarios = []
+                for idx, e in enumerate(info_main['entries']):
+                    if e:  # Validação ampla: aceita qualquer objeto preenchido
+                        resultados_temporarios.append({
+                            'title': e.get('title') or e.get('playlist_index') or f"Faixa {idx+1}", 
+                            'url': e.get('webpage_url') or e.get('url') or '', 
+                            'stream_url': e.get('url') or '',
+                            'uploader': e.get('uploader') or e.get('channel') or 'Desconhecido', 
+                            'duration': e.get('duration_string') or '0:00', 
+                            'id': e.get('id') or f"fallback_{idx}"
+                        })
+                st.session_state.main_search_results = resultados_temporarios
                 st.session_state.last_main_query = search_query
+
+    # Alerta visual se a lista realmente voltar zerada da API
+    if 'main_search_results' in st.session_state:
+        if not st.session_state.main_search_results:
+            st.warning("⚠️ O YouTube não retornou nenhuma faixa para essa busca. Tente refinar o termo ou use palavras mais simples (ex: apenas o nome do artista).")
+        else:
+            st.subheader("🎯 Escolha o ponto de partida:")
+            cols_start = st.columns(3)
+            for idx, track in enumerate(st.session_state.main_search_results):
+                with cols_start[idx]:
+                    with st.container(border=True):
+                        st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
+                        st.caption(f"{track['uploader']} • {track['duration']}")
+                        if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
+                            tocar_faixa(track)
 
     if 'main_search_results' in st.session_state:
         st.subheader("🎯 Escolha o ponto de partida:")
