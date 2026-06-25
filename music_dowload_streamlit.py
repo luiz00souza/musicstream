@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 import yt_dlp
+import requests
 
 # Configuração da página
 st.set_page_config(
@@ -52,14 +53,7 @@ st.markdown("""
     }
     .stButton button:hover { background-color: #1ED760 !important; }
     
-    .btn-secondary button {
-        background-color: #282828 !important;
-        color: #FFFFFF !important;
-        border: 1px solid #727272 !important;
-    }
-    .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
-    
-    /* Estilo customizado para o botão de download nativo do streamlit */
+    /* Botão de Download customizado */
     .stDownloadButton button {
         background-color: #ffffff !important;
         color: #121212 !important;
@@ -67,7 +61,14 @@ st.markdown("""
         border-radius: 50px !important;
         border: none !important;
     }
-    .stDownloadButton button:hover { background-color: #e0e0e0 !important; }
+    .stDownloadButton button:hover { background-color: #1DB954 !important; color: #ffffff !important; }
+
+    .btn-secondary button {
+        background-color: #282828 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #727272 !important;
+    }
+    .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -78,6 +79,17 @@ if 'queue' not in st.session_state:
     st.session_state.queue = []
 if 'history' not in st.session_state:
     st.session_state.history = []
+
+# --- FUNÇÃO AUXILIAR PARA DOWNLOAD SEGURO ---
+@st.cache_data(show_spinner=False)
+def obter_bytes_audio(url):
+    try:
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            return response.content
+    except:
+        pass
+    return None
 
 # --- MOTOR DE RECOMENDAÇÃO CONTÍNUA ---
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
@@ -130,27 +142,6 @@ def avancar_fila():
     else:
         st.toast("Fim da playlist automática.", icon="🛑")
 
-# --- FUNÇÃO AUXILIAR PARA DOWNLOAD ---
-@st.cache_data(show_spinner="Preparando arquivo para download...")
-def baixar_arquivo_audio(url_audio):
-    try:
-        ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio',
-            'outtmpl': '-',  # Joga o output direto pra memória (stdout)
-            'logtostderr': True,
-            'quiet': True
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Baixa os bytes do áudio diretamente em memória para o Streamlit disponibilizar
-            buffer = ydl.run_dowload([url_audio]) if hasattr(ydl, 'run_download') else None
-            # Abordagem segura via download clássico em stream de bytes
-            info = ydl.extract_info(url_audio, download=False)
-            import requests
-            r = requests.get(info['url'], stream=True)
-            return r.content
-    except Exception:
-        return None
-
 # --- INTERFACE ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
 st.caption("Streaming contínuo com Autoplay e Crossfade nativo no navegador.")
@@ -193,13 +184,29 @@ if search_query:
                     continue
                     
                 with st.container(border=True):
-                    col_info, col_btn = st.columns([8, 2])
+                    col_info, col_btn_play, col_btn_dl = st.columns([7, 1.5, 1.5])
                     with col_info:
                         st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
                         st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
-                    with col_btn:
-                        if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
+                    
+                    with col_btn_play:
+                        if st.button("Ouvir 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
                             tocar_faixa(track)
+                            
+                    with col_btn_dl:
+                        # Baixa o arquivo m4a sob demanda de forma simplificada
+                        audio_data = obter_bytes_audio(track['stream_url'])
+                        if audio_data:
+                            st.download_button(
+                                label="Baixar ⬇️",
+                                data=audio_data,
+                                file_name=f"{track['title'][:50]}.m4a",
+                                mime="audio/mp4",
+                                key=f"dl_{track['id']}_{idx}",
+                                use_container_width=True
+                            )
+                        else:
+                            st.button("Indisponível ❌", key=f"dl_fail_{track['id']}_{idx}", disabled=True, use_container_width=True)
             except Exception:
                 continue
 
@@ -262,11 +269,10 @@ if st.session_state.current_track:
         response = components.html(js_player_component, height=90)
         
         st.write("")
-        # Linha de botões de controle e download abaixo do player
-        c1, c2 = st.columns([1, 1])
-        with c1:
+        c1, c2, c3 = st.columns([2, 8, 2])
+        with c2:
             if st.session_state.queue:
-                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:25]}..."
+                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
             else:
                 texto_proxima = "Fim da Fila"
                 
@@ -274,20 +280,6 @@ if st.session_state.current_track:
             if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
-            
-        with c2:
-            # Processa e gera o botão de download de forma assíncrona/cacheada
-            dados_audio = baixar_arquivo_audio(st.session_state.current_track['url'])
-            if dados_audio:
-                st.download_button(
-                    label="Baixar Áudio 📥",
-                    data=dados_audio,
-                    file_name=f"{st.session_state.current_track['title']}.mp3",
-                    mime="audio/mpeg",
-                    use_container_width=True
-                )
-            else:
-                st.button("Download Indisponível ⚠️", disabled=True, use_container_width=True)
 
     # COLUNA 2: A FILA DINÂMICA
     with col_queue_right:
