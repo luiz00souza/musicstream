@@ -73,7 +73,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONFIGURAÇÃO GLOBAL ANTI-BLOQUEIO PARA YT-DLP ---
-# Dicionário base reutilizável que camufla o backend do Streamlit como um navegador comum
 CONFIG_ANTI_BLOCK = {
     'nocheckcertificate': True,
     'ignoreerrors': True,
@@ -106,7 +105,6 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
     filtradas = []
     nomes_bloqueados = [track['title']] + [t['title'] for t in st.session_state.queue]
     
-    # Unindo suas regras de formato m4a com a nossa configuração anti-bloqueio
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio', 
         'extract_flat': False, 
@@ -114,7 +112,6 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
         **CONFIG_ANTI_BLOCK
     }
     
-    # --- ENGENHARIA DE EXTRAÇÃO DE ARTISTA ---
     titulo_original = track['title']
     nome_artista = track['uploader'] # Fallback inicial
     
@@ -123,7 +120,6 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
     elif " – " in titulo_original:
         nome_artista = titulo_original.split(" – ")[0].strip()
     
-    # Sanitização de sufixos de canais automáticos do YouTube
     termos_limpeza = [" - Topic", " Oficial", " Official", " VEVO", " Tema"]
     for termo in termos_limpeza:
         nome_artista = nome_artista.replace(termo, "")
@@ -139,7 +135,7 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
                     if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                         filtradas.append({
                             'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                            'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                            'uploader': entry.get('uploader'), 'duration': entry.get('duration_string') or '0:00', 'id': entry.get('id'),
                             'tag': '💿 MESMO ÁLBUM', 'tag_color': '#4A90E2'
                         })
                         nomes_bloqueados.append(entry.get('title'))
@@ -156,7 +152,7 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
                         if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string') or '0:00', 'id': entry.get('id'),
                                 'tag': '👤 MESMO ARTISTA', 'tag_color': '#1DB954'
                             })
                             nomes_bloqueados.append(entry.get('title'))
@@ -173,7 +169,7 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
                         if isinstance(entry, dict) and entry.get('title') not in nomes_bloqueados and len(filtradas) < num_resultados:
                             filtradas.append({
                                 'title': entry.get('title'), 'url': entry.get('webpage_url'), 'stream_url': entry.get('url'),
-                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string'), 'id': entry.get('id'),
+                                'uploader': entry.get('uploader'), 'duration': entry.get('duration_string') or '0:00', 'id': entry.get('id'),
                                 'tag': '🎶 MIX / PLAYLIST', 'tag_color': '#7D3CFF'
                             })
                             nomes_bloqueados.append(entry.get('title'))
@@ -185,6 +181,25 @@ def buscar_musicas_hierarquicas(track, num_resultados=4):
 def tocar_faixa(track):
     if st.session_state.current_track:
         st.session_state.history.append(st.session_state.current_track)
+    
+    # Se a faixa veio da busca inicial ('extract_flat': True), precisamos obter o stream_url real dela antes de tocar
+    if not track.get('stream_url'):
+        with st.spinner("Buscando link de streaming estável..."):
+            ydl_opts_stream = {
+                'format': 'bestaudio[ext=m4a]/bestaudio',
+                'skip_download': True,
+                **CONFIG_ANTI_BLOCK
+            }
+            with yt_dlp.YoutubeDL(ydl_opts_stream) as ydl:
+                try:
+                    info_real = ydl.extract_info(track['url'], download=False)
+                    if info_real:
+                        track['stream_url'] = info_real.get('url')
+                        track['duration'] = info_real.get('duration_string') or '0:00'
+                except Exception as e:
+                    st.error(f"Não foi possível carregar o áudio dessa faixa: {e}")
+                    return
+
     st.session_state.current_track = track
     
     with st.spinner("Analisando prioridades de reprodução..."):
@@ -211,7 +226,7 @@ if search_query:
         with st.spinner("Sintonizando frequências..."):
             ydl_opts_main = {
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
-                'extract_flat': True,  # Mudamos para True na busca inicial para vir rápido e leve
+                'extract_flat': True,  # Busca rápida e leve para evitar captchas e blocks
                 'skip_download': True,
                 **CONFIG_ANTI_BLOCK
             }
@@ -219,18 +234,17 @@ if search_query:
                 try:
                     info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
                 except Exception as e:
-                    st.error(f"Erro na rede do backend: {e}")
+                    st.error(f"Erro na busca: {e}")
                     info_main = None
 
-            # EXTRAÇÃO FLEXÍVEL: Aceita os dados mesmo se a estrutura de metadados for parcial
             if info_main and isinstance(info_main, dict) and 'entries' in info_main:
                 resultados_temporarios = []
                 for idx, e in enumerate(info_main['entries']):
-                    if e:  # Validação ampla: aceita qualquer objeto preenchido
+                    if e:
                         resultados_temporarios.append({
-                            'title': e.get('title') or e.get('playlist_index') or f"Faixa {idx+1}", 
+                            'title': e.get('title') or f"Faixa {idx+1}", 
                             'url': e.get('webpage_url') or e.get('url') or '', 
-                            'stream_url': e.get('url') or '',
+                            'stream_url': e.get('url') if not e.get('_type') == 'url' else '',
                             'uploader': e.get('uploader') or e.get('channel') or 'Desconhecido', 
                             'duration': e.get('duration_string') or '0:00', 
                             'id': e.get('id') or f"fallback_{idx}"
@@ -238,31 +252,22 @@ if search_query:
                 st.session_state.main_search_results = resultados_temporarios
                 st.session_state.last_main_query = search_query
 
-    # Alerta visual se a lista realmente voltar zerada da API
     if 'main_search_results' in st.session_state:
         if not st.session_state.main_search_results:
-            st.warning("⚠️ O YouTube não retornou nenhuma faixa para essa busca. Tente refinar o termo ou use palavras mais simples (ex: apenas o nome do artista).")
+            st.warning("⚠️ O YouTube não retornou resultados. Tente simplificar a pesquisa.")
         else:
             st.subheader("🎯 Escolha o ponto de partida:")
             cols_start = st.columns(3)
             for idx, track in enumerate(st.session_state.main_search_results):
-                with cols_start[idx]:
-                    with st.container(border=True):
-                        st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
-                        st.caption(f"{track['uploader']} • {track['duration']}")
-                        if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
-                            tocar_faixa(track)
-
-    if 'main_search_results' in st.session_state:
-        st.subheader("🎯 Escolha o ponto de partida:")
-        cols_start = st.columns(3)
-        for idx, track in enumerate(st.session_state.main_search_results):
-            with cols_start[idx]:
-                with st.container(border=True):
-                    st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
-                    st.caption(f"{track['uploader']} • {track['duration']}")
-                    if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
-                        tocar_faixa(track)
+                if idx < len(cols_start):
+                    with cols_start[idx]:
+                        with st.container(border=True):
+                            st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
+                            st.caption(f"{track['uploader']} • {track['duration']}")
+                            
+                            # Chave única garantida combinando o índice (idx) e o ID
+                            if st.button("Iniciar Rádio aqui 📻", key=f"start_btn_{idx}_{track['id']}", use_container_width=True):
+                                tocar_faixa(track)
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
@@ -278,7 +283,7 @@ if st.session_state.current_track:
             </div>
         """, unsafe_allow_html=True)
         
-        # --- PLAYER MULTI-FAIXAS COMPACTO EM JAVASCRIPT ---
+        # --- PREPARAÇÃO DA PLAYLIST MULTI-FAIXAS ---
         lista_streams = [st.session_state.current_track['stream_url']]
         lista_titulos = [st.session_state.current_track['title']]
         
@@ -289,7 +294,7 @@ if st.session_state.current_track:
         js_streams = json.dumps(lista_streams)
         js_titulos = json.dumps(lista_titulos)
         
-        # String limpa sem o 'f' (evita conflitos sintáticos do interpretador Python com chaves de JS)
+        # String limpa sem f-string para rodar JavaScript sem quebras de sintaxe no interpretador Python
         js_player_component = """
         <div style="background-color: #181818; padding: 15px; border-radius: 12px;">
             <audio id="audio-player" src="STREAM_INITIAL_URL" controls autoplay style="width: 100%; height: 40px;"></audio>
