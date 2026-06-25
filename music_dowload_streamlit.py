@@ -73,16 +73,21 @@ if 'history' not in st.session_state:
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
     try:
         query = f"{termo_referencia} mix musicas semelhantes"
-        ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio', 
+            'extract_flat': False, 
+            'skip_download': True,
+            'ignoreerrors': True
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch6:{query}", download=False)
             
-        if 'entries' in info and len(info['entries']) > 0:
+        if info and 'entries' in info and len(info['entries']) > 0:
             filtradas = []
             nomes_bloqueados = [st.session_state.current_track['title']] if st.session_state.current_track else []
             nomes_bloqueados += [t['title'] for t in st.session_state.queue]
             
-            for entry in info['entries']:
+            for entry in filter(None, info['entries']):
                 if entry.get('title') not in nomes_bloqueados:
                     filtradas.append({
                         'title': entry.get('title'),
@@ -125,25 +130,37 @@ search_query = st.text_input("", placeholder="Digite uma música ou artista para
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            # Alterado de ytsearch3 para ytsearch10 para trazer até 10 resultados
-            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
-            with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
-            if 'entries' in info_main and len(info_main['entries']) > 0:
-                st.session_state.main_search_results = [{
-                    'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
-                    'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
-                } for e in info_main['entries']]
-                st.session_state.last_main_query = search_query
+            ydl_opts_main = {
+                'format': 'bestaudio[ext=m4a]/bestaudio', 
+                'extract_flat': False, 
+                'skip_download': True,
+                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
+                    info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
+                
+                if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
+                    # Filtra possíveis 'None' gerados por vídeos que falharam
+                    st.session_state.main_search_results = [{
+                        'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
+                        'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
+                    } for e in filter(None, info_main['entries'])]
+                    st.session_state.last_main_query = search_query
+                else:
+                    st.session_state.main_search_results = []
+                    st.warning("Nenhum resultado válido encontrado para esta busca.")
+            except Exception:
+                st.error("Erro de conexão ao buscar no YouTube. Tente novamente em alguns segundos.")
+                st.session_state.main_search_results = []
 
-    if 'main_search_results' in st.session_state:
+    if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
-        # Exibição em formato de Lista vertical com tratamento de erros por item
+        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
-                # Se faltar dados cruciais na track extraída do YT, pula silenciosamente
-                if not track.get('title') or not track.get('id'):
+                if not track or not track.get('title') or not track.get('id'):
                     continue
                     
                 with st.container(border=True):
@@ -155,7 +172,6 @@ if search_query:
                         if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
                             tocar_faixa(track)
             except Exception:
-                # Ignora o item caso dê qualquer erro inesperado ao renderizá-lo para a lista não quebrar
                 continue
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
