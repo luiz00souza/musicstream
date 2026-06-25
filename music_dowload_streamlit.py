@@ -53,16 +53,6 @@ st.markdown("""
     }
     .stButton button:hover { background-color: #1ED760 !important; }
     
-    /* Botão de Download customizado */
-    .stDownloadButton button {
-        background-color: #ffffff !important;
-        color: #121212 !important;
-        font-weight: bold !important;
-        border-radius: 50px !important;
-        border: none !important;
-    }
-    .stDownloadButton button:hover { background-color: #1DB954 !important; color: #ffffff !important; }
-
     .btn-secondary button {
         background-color: #282828 !important;
         color: #FFFFFF !important;
@@ -80,14 +70,15 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# --- FUNÇÃO AUXILIAR PARA DOWNLOAD SEGURO ---
-@st.cache_data(show_spinner=False)
+# --- FUNÇÃO DE DOWNLOAD SEGURO ---
+@st.cache_data(show_spinner=False, ttl=600)
 def obter_bytes_audio(url):
     try:
-        response = requests.get(url, timeout=15)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             return response.content
-    except:
+    except Exception:
         pass
     return None
 
@@ -184,29 +175,13 @@ if search_query:
                     continue
                     
                 with st.container(border=True):
-                    col_info, col_btn_play, col_btn_dl = st.columns([7, 1.5, 1.5])
+                    col_info, col_btn = st.columns([8, 2])
                     with col_info:
                         st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
                         st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
-                    
-                    with col_btn_play:
-                        if st.button("Ouvir 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
+                    with col_btn:
+                        if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
                             tocar_faixa(track)
-                            
-                    with col_btn_dl:
-                        # Baixa o arquivo m4a sob demanda de forma simplificada
-                        audio_data = obter_bytes_audio(track['stream_url'])
-                        if audio_data:
-                            st.download_button(
-                                label="Baixar ⬇️",
-                                data=audio_data,
-                                file_name=f"{track['title'][:50]}.m4a",
-                                mime="audio/mp4",
-                                key=f"dl_{track['id']}_{idx}",
-                                use_container_width=True
-                            )
-                        else:
-                            st.button("Indisponível ❌", key=f"dl_fail_{track['id']}_{idx}", disabled=True, use_container_width=True)
             except Exception:
                 continue
 
@@ -270,6 +245,8 @@ if st.session_state.current_track:
         
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
+        
+        # --- CONTROLES MANUAIS E BOTÃO DE DOWNLOAD ---
         with c2:
             if st.session_state.queue:
                 texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
@@ -280,6 +257,20 @@ if st.session_state.current_track:
             if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Botão de Download simplificado integrado abaixo do player
+            st.write("")
+            audio_bytes = obter_bytes_audio(src_audio)
+            if audio_bytes:
+                st.download_button(
+                    label="📥 Baixar faixa atual (.m4a)",
+                    data=audio_bytes,
+                    file_name=f"{st.session_state.current_track['title']}.m4a",
+                    mime="audio/mp4",
+                    use_container_width=True
+                )
+            else:
+                st.caption("⚠️ Link de download indisponível para esta faixa.")
 
     # COLUNA 2: A FILA DINÂMICA
     with col_queue_right:
