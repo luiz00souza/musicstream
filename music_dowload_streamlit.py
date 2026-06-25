@@ -2,7 +2,6 @@ import os
 import streamlit as st
 import streamlit.components.v1 as components
 import yt_dlp
-import requests
 
 # Configuração da página
 st.set_page_config(
@@ -70,18 +69,6 @@ if 'queue' not in st.session_state:
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# --- FUNÇÃO DE DOWNLOAD SEGURO ---
-@st.cache_data(show_spinner=False, ttl=600)
-def obter_bytes_audio(url):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return response.content
-    except Exception:
-        pass
-    return None
-
 # --- MOTOR DE RECOMENDAÇÃO CONTÍNUA ---
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
     try:
@@ -147,13 +134,14 @@ if search_query:
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
                 'skip_download': True,
-                'ignoreerrors': True  
+                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                     info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
+                    # Filtra possíveis 'None' gerados por vídeos que falharam
                     st.session_state.main_search_results = [{
                         'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
                         'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
@@ -169,6 +157,7 @@ if search_query:
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
+        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
                 if not track or not track.get('title') or not track.get('id'):
@@ -245,8 +234,6 @@ if st.session_state.current_track:
         
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
-        
-        # --- CONTROLES MANUAIS E BOTÃO DE DOWNLOAD ---
         with c2:
             if st.session_state.queue:
                 texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
@@ -257,20 +244,6 @@ if st.session_state.current_track:
             if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Botão de Download simplificado integrado abaixo do player
-            st.write("")
-            audio_bytes = obter_bytes_audio(src_audio)
-            if audio_bytes:
-                st.download_button(
-                    label="📥 Baixar faixa atual (.m4a)",
-                    data=audio_bytes,
-                    file_name=f"{st.session_state.current_track['title']}.m4a",
-                    mime="audio/mp4",
-                    use_container_width=True
-                )
-            else:
-                st.caption("⚠️ Link de download indisponível para esta faixa.")
 
     # COLUNA 2: A FILA DINÂMICA
     with col_queue_right:
