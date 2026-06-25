@@ -58,6 +58,16 @@ st.markdown("""
         border: 1px solid #727272 !important;
     }
     .btn-secondary button:hover { background-color: #3e3e3e !important; border-color: #FFFFFF !important; }
+    
+    /* Estilo customizado para o botão de download nativo do streamlit */
+    .stDownloadButton button {
+        background-color: #ffffff !important;
+        color: #121212 !important;
+        font-weight: bold !important;
+        border-radius: 50px !important;
+        border: none !important;
+    }
+    .stDownloadButton button:hover { background-color: #e0e0e0 !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -120,6 +130,27 @@ def avancar_fila():
     else:
         st.toast("Fim da playlist automática.", icon="🛑")
 
+# --- FUNÇÃO AUXILIAR PARA DOWNLOAD ---
+@st.cache_data(show_spinner="Preparando arquivo para download...")
+def baixar_arquivo_audio(url_audio):
+    try:
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio',
+            'outtmpl': '-',  # Joga o output direto pra memória (stdout)
+            'logtostderr': True,
+            'quiet': True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Baixa os bytes do áudio diretamente em memória para o Streamlit disponibilizar
+            buffer = ydl.run_dowload([url_audio]) if hasattr(ydl, 'run_download') else None
+            # Abordagem segura via download clássico em stream de bytes
+            info = ydl.extract_info(url_audio, download=False)
+            import requests
+            r = requests.get(info['url'], stream=True)
+            return r.content
+    except Exception:
+        return None
+
 # --- INTERFACE ---
 st.title("🎵 SpotPy: Infinite Radio Mode")
 st.caption("Streaming contínuo com Autoplay e Crossfade nativo no navegador.")
@@ -134,14 +165,13 @@ if search_query:
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
                 'skip_download': True,
-                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+                'ignoreerrors': True  
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                     info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
-                    # Filtra possíveis 'None' gerados por vídeos que falharam
                     st.session_state.main_search_results = [{
                         'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
                         'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
@@ -157,7 +187,6 @@ if search_query:
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
-        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
                 if not track or not track.get('title') or not track.get('id'):
@@ -233,10 +262,11 @@ if st.session_state.current_track:
         response = components.html(js_player_component, height=90)
         
         st.write("")
-        c1, c2, c3 = st.columns([2, 8, 2])
-        with c2:
+        # Linha de botões de controle e download abaixo do player
+        c1, c2 = st.columns([1, 1])
+        with c1:
             if st.session_state.queue:
-                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:35]}..."
+                texto_proxima = f"Avançar para: {st.session_state.queue[0]['title'][:25]}..."
             else:
                 texto_proxima = "Fim da Fila"
                 
@@ -244,6 +274,20 @@ if st.session_state.current_track:
             if st.button(f"⏭️ {texto_proxima}", use_container_width=True, disabled=not st.session_state.queue):
                 avancar_fila()
             st.markdown('</div>', unsafe_allow_html=True)
+            
+        with c2:
+            # Processa e gera o botão de download de forma assíncrona/cacheada
+            dados_audio = baixar_arquivo_audio(st.session_state.current_track['url'])
+            if dados_audio:
+                st.download_button(
+                    label="Baixar Áudio 📥",
+                    data=dados_audio,
+                    file_name=f"{st.session_state.current_track['title']}.mp3",
+                    mime="audio/mpeg",
+                    use_container_width=True
+                )
+            else:
+                st.button("Download Indisponível ⚠️", disabled=True, use_container_width=True)
 
     # COLUNA 2: A FILA DINÂMICA
     with col_queue_right:
