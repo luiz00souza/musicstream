@@ -73,16 +73,21 @@ if 'history' not in st.session_state:
 def buscar_musicas_similares(termo_referencia, num_resultados=4):
     try:
         query = f"{termo_referencia} mix musicas semelhantes"
-        ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio', 
+            'extract_flat': False, 
+            'skip_download': True,
+            'ignoreerrors': True
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"ytsearch6:{query}", download=False)
             
-        if 'entries' in info and len(info['entries']) > 0:
+        if info and 'entries' in info and len(info['entries']) > 0:
             filtradas = []
             nomes_bloqueados = [st.session_state.current_track['title']] if st.session_state.current_track else []
             nomes_bloqueados += [t['title'] for t in st.session_state.queue]
             
-            for entry in info['entries']:
+            for entry in filter(None, info['entries']):
                 if entry.get('title') not in nomes_bloqueados:
                     filtradas.append({
                         'title': entry.get('title'),
@@ -125,26 +130,49 @@ search_query = st.text_input("", placeholder="Digite uma música ou artista para
 if search_query:
     if 'last_main_query' not in st.session_state or st.session_state.last_main_query != search_query:
         with st.spinner("Sintonizando frequências..."):
-            ydl_opts_main = {'format': 'bestaudio[ext=m4a]/bestaudio', 'extract_flat': False, 'skip_download': True}
-            with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
-                info_main = ydl.extract_info(f"ytsearch3:{search_query}", download=False)
-            if 'entries' in info_main and len(info_main['entries']) > 0:
-                st.session_state.main_search_results = [{
-                    'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
-                    'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
-                } for e in info_main['entries']]
-                st.session_state.last_main_query = search_query
+            ydl_opts_main = {
+                'format': 'bestaudio[ext=m4a]/bestaudio', 
+                'extract_flat': False, 
+                'skip_download': True,
+                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+            }
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
+                    info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
+                
+                if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
+                    # Filtra possíveis 'None' gerados por vídeos que falharam
+                    st.session_state.main_search_results = [{
+                        'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
+                        'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
+                    } for e in filter(None, info_main['entries'])]
+                    st.session_state.last_main_query = search_query
+                else:
+                    st.session_state.main_search_results = []
+                    st.warning("Nenhum resultado válido encontrado para esta busca.")
+            except Exception:
+                st.error("Erro de conexão ao buscar no YouTube. Tente novamente em alguns segundos.")
+                st.session_state.main_search_results = []
 
-    if 'main_search_results' in st.session_state:
+    if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
-        cols_start = st.columns(3)
+        
+        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
-            with cols_start[idx]:
+            try:
+                if not track or not track.get('title') or not track.get('id'):
+                    continue
+                    
                 with st.container(border=True):
-                    st.markdown(f"**{track['title'][:60]}...**" if len(track['title']) > 60 else f"**{track['title']}**")
-                    st.caption(f"{track['uploader']} • {track['duration']}")
-                    if st.button("Iniciar Rádio aqui 📻", key=f"start_{track['id']}", use_container_width=True):
-                        tocar_faixa(track)
+                    col_info, col_btn = st.columns([8, 2])
+                    with col_info:
+                        st.markdown(f"**{idx+1}. {track['title'][:90]}...**" if len(track['title']) > 90 else f"**{idx+1}. {track['title']}**")
+                        st.caption(f"{track.get('uploader', 'Desconhecido')} • {track.get('duration', '00:00')}")
+                    with col_btn:
+                        if st.button("Iniciar Rádio 📻", key=f"start_{track['id']}_{idx}", use_container_width=True):
+                            tocar_faixa(track)
+            except Exception:
+                continue
 
 # --- PAINEL DO PLAYER DE ÁUDIO AVANÇADO ---
 if st.session_state.current_track:
@@ -161,8 +189,6 @@ if st.session_state.current_track:
             </div>
         """, unsafe_allow_html=True)
         
-        # --- INJEÇÃO HTML5 + JAVASCRIPT: AUTOPLAY, FADE & TRIM SILÊNCIO ---
-        # Criamos um player customizado invisível/visível que controla o fluxo via JavaScript
         src_audio = st.session_state.current_track['stream_url']
         
         js_player_component = f"""
@@ -174,19 +200,14 @@ if st.session_state.current_track:
             const audio = document.getElementById('audio-player');
             let fadeTriggered = false;
 
-            // 1. CORTE DE SILÊNCIO (Garante início imediato se houver bloco em branco)
             audio.addEventListener('canplaythrough', () => {{
-                // Se o áudio estiver travado no início em silêncio por erro de codec, pula para 0.5s
                 if (audio.currentTime < 0.5) {{
-                    // Opcional: Algumas transmissões começam com pequenos frames vazios
                 }}
             }});
 
-            // 2. MONITORAMENTO DE TEMPO PARA TRANSICAO (FADE OUT)
             audio.addEventListener('timeupdate', () => {{
                 const timeLeft = audio.duration - audio.currentTime;
                 
-                // Ativa o Fade-out faltando 4 segundos para acabar a música
                 if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
                     fadeTriggered = true;
                     fadeVolumeOut(audio);
@@ -202,22 +223,15 @@ if st.session_state.current_track:
                     }} else {{
                         player.volume = 0;
                         clearInterval(interval);
-                        // 3. EVENTO DE AUTOPLAY: Notifica o Streamlit para avançar
                         window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
                     }}
-                }}, 200); // Executa a redução a cada 200 milissegundos
+                }}, 200);
             }}
         </script>
         """
         
-        # Renderiza o componente de áudio inteligente injetando o script acima
-        # Usamos uma altura fixa e capturamos a resposta se ele mandar 'NEXT_TRACK'
         response = components.html(js_player_component, height=90)
         
-        # Se o JavaScript avisou que a música acabou (ou entrou no fade zero), o Python avança!
-        # Nota: Como estamos lidando com a sandbox do Streamlit, usamos o botão de fallback se o postMessage falhar
-        
-        # Controles Manuais Alternativos
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
         with c2:
