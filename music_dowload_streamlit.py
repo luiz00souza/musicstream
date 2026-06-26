@@ -1,6 +1,5 @@
 import os
 import streamlit as st
-import streamlit.components.v1 as components
 import yt_dlp
 
 # Configuração da página
@@ -134,14 +133,13 @@ if search_query:
                 'format': 'bestaudio[ext=m4a]/bestaudio', 
                 'extract_flat': False, 
                 'skip_download': True,
-                'ignoreerrors': True  # Ignora erros de vídeos indisponíveis/restritos no meio da busca de 10 itens
+                'ignoreerrors': True  
             }
             try:
                 with yt_dlp.YoutubeDL(ydl_opts_main) as ydl:
                     info_main = ydl.extract_info(f"ytsearch10:{search_query}", download=False)
                 
                 if info_main and 'entries' in info_main and len(info_main['entries']) > 0:
-                    # Filtra possíveis 'None' gerados por vídeos que falharam
                     st.session_state.main_search_results = [{
                         'title': e.get('title'), 'url': e.get('webpage_url'), 'stream_url': e.get('url'),
                         'uploader': e.get('uploader'), 'duration': e.get('duration_string'), 'id': e.get('id')
@@ -157,7 +155,6 @@ if search_query:
     if 'main_search_results' in st.session_state and st.session_state.main_search_results:
         st.subheader("🎯 Escolha o ponto de partida:")
         
-        # Exibição em lista vertical protegida
         for idx, track in enumerate(st.session_state.main_search_results):
             try:
                 if not track or not track.get('title') or not track.get('id'):
@@ -191,46 +188,85 @@ if st.session_state.current_track:
         
         src_audio = st.session_state.current_track['stream_url']
         
+        # Player persistente injetado via st.markdown para evitar os problemas de reset do iframe
         js_player_component = f"""
-        <div style="background-color: #181818; padding: 15px; border-radius: 30px; display: flex; align-items: center; justify-content: center;">
-            <audio id="audio-player" src="{src_audio}" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>
-        </div>
-
+        <div id="player-container"></div>
         <script>
-            const audio = document.getElementById('audio-player');
-            let fadeTriggered = false;
+        (function() {{
+            var globalPlayer = window.parent.document.getElementById('global-audio-player');
+            var container = document.getElementById('player-container');
+            var targetSrc = "{src_audio}";
 
-            audio.addEventListener('canplaythrough', () => {{
-                if (audio.currentTime < 0.5) {{
-                }}
-            }});
-
-            audio.addEventListener('timeupdate', () => {{
-                const timeLeft = audio.duration - audio.currentTime;
+            if (!globalPlayer) {{
+                // Criar o elemento do player pela primeira vez na janela global
+                var playerWrapper = document.createElement('div');
+                playerWrapper.style.backgroundColor = '#181818';
+                playerWrapper.style.padding = '15px';
+                playerWrapper.style.borderRadius = '30px';
+                playerWrapper.style.display = 'flex';
+                playerWrapper.style.alignItems = 'center';
+                playerWrapper.style.justifyContent = 'center';
+                playerWrapper.innerHTML = '<audio id="global-audio-player" src="' + targetSrc + '" controls autoplay style="width: 100%; border-radius: 30px; height: 40px;"></audio>';
                 
-                if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
-                    fadeTriggered = true;
-                    fadeVolumeOut(audio);
+                container.appendChild(playerWrapper);
+                globalPlayer = window.parent.document.getElementById('global-audio-player');
+                setupAudioEvents(globalPlayer);
+            }} else {{
+                // Mover o player existente para o container atual para manter o layout visual correto
+                container.appendChild(globalPlayer.parentElement);
+                
+                // Se a música mudou na sessão, atualiza o arquivo de áudio
+                if (globalPlayer.getAttribute('src') !== targetSrc) {{
+                    globalPlayer.src = targetSrc;
+                    globalPlayer.volume = 1.0;
+                    globalPlayer.play();
                 }}
-            }});
-
-            function fadeVolumeOut(player) {{
-                let volume = player.volume;
-                const interval = setInterval(() => {{
-                    if (volume > 0.05) {{
-                        volume -= 0.05;
-                        player.volume = volume;
-                    }} else {{
-                        player.volume = 0;
-                        clearInterval(interval);
-                        window.parent.postMessage({{type: 'streamlit:setComponentValue', value: 'NEXT_TRACK'}}, '*');
-                    }}
-                }}, 200);
             }}
+
+            function setupAudioEvents(audio) {{
+                var fadeTriggered = false;
+
+                audio.addEventListener('timeupdate', function() {{
+                    var timeLeft = audio.duration - audio.currentTime;
+                    
+                    // Dispara o crossfade nos últimos 4 segundos
+                    if (timeLeft <= 4 && !fadeTriggered && audio.duration > 0) {{
+                        fadeTriggered = true;
+                        fadeVolumeOut(audio);
+                    }}
+                }});
+
+                audio.addEventListener('play', function() {{
+                    fadeTriggered = false;
+                }});
+
+                function fadeVolumeOut(player) {{
+                    var volume = player.volume;
+                    var interval = setInterval(function() {{
+                        if (volume > 0.05) {{
+                            volume -= 0.05;
+                            player.volume = volume;
+                        }} else {{
+                            player.volume = 0;
+                            clearInterval(interval);
+                            
+                            // Procura o botão "Avançar" do Streamlit e simula o clique do usuário
+                            var buttons = window.parent.document.querySelectorAll('button');
+                            for (var i = 0; i < buttons.length; i++) {{
+                                if (buttons[i].innerText.includes('⏭️')) {{
+                                    buttons[i].click();
+                                    break;
+                                }}
+                            }}
+                        }}
+                    }}, 200);
+                }}
+            }}
+        }})();
         </script>
         """
         
-        response = components.html(js_player_component, height=90)
+        st.markdown(js_player_component, unsafe_allow_html=True)
         
         st.write("")
         c1, c2, c3 = st.columns([2, 8, 2])
